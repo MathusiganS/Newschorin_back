@@ -87,15 +87,10 @@ class TamilwinSpider(scrapy.Spider):
         paragraphs = response.css(".ds-content p::text, .ds-content p *::text").getall()
         full_text = "\n".join(p.strip() for p in paragraphs if p.strip())
 
-        # Download the image locally
-        image_path = ""
-        if image_url:
-            image_path = self._download_image(image_url, response.url)
-
         yield {
             "title": title,
             "url": response.url,
-            "image_path": image_path,
+            "image_path": image_url,
             "full_text": full_text,
             "source": "tamilwin",
         }

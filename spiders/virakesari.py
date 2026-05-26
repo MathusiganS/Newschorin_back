@@ -127,14 +127,10 @@ class VirakesariSpider(scrapy.Spider):
 
         full_text = "\n".join(p.strip() for p in paragraphs if p.strip())
 
-        image_path = ""
-        if image_url:
-            image_path = self._download_image(image_url, response.url)
-
         yield {
             "title": title,
             "url": response.url,
-            "image_path": image_path,
+            "image_path": image_url,
             "full_text": full_text,
             "source": "virakesari",
         }

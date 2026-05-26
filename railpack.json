@@ -1,7 +1,15 @@
 {
   "$schema": "https://schema.railpack.com",
   "provider": "python",
+  "steps": {
+    "install": {
+      "commands": [
+        "pip install -r requirements.txt",
+        "PLAYWRIGHT_BROWSERS_PATH=0 python -m playwright install chromium"
+      ]
+    }
+  },
   "deploy": {
-    "startCommand": "sh -c \"ln -sfn /app /tmp/tamilwin_scraper && PYTHONPATH=/tmp uvicorn tamilwin_scraper.fastapi_app:app --host 0.0.0.0 --port $PORT\""
+    "startCommand": "sh -c \"ln -sfn /app /tmp/tamilwin_scraper && PLAYWRIGHT_BROWSERS_PATH=0 PYTHONPATH=/tmp uvicorn tamilwin_scraper.fastapi_app:app --host 0.0.0.0 --port $PORT\""
   }
 }
