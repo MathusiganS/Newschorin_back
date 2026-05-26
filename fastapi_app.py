@@ -31,7 +31,10 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from tamilwin_scraper.env import load_env_file
 from tamilwin_scraper.classifier import classify_article_for_pipeline, diagnose_classifier
+
+load_env_file()
 
 DB_URL = os.environ.get(
     "DATABASE_URL",

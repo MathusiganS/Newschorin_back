@@ -7,9 +7,15 @@ from tamilwin_scraper.classifier import (
     classify_article_for_pipeline,
     diagnose_classifier,
 )
+from tamilwin_scraper.env import load_env_file
 
 
-DB_URL = "postgresql://postgres:12345@localhost:5432/news_techorin"
+load_env_file()
+
+DB_URL = os.environ.get(
+    "DATABASE_URL",
+    "postgresql://postgres:12345@localhost:5432/news_techorin",
+)
 
 
 class SaveNewsPipeline:
