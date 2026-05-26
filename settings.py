@@ -1,4 +1,12 @@
+import os
+import sys
+
 # Scrapy settings for tamilwin_scraper project
+
+PACKAGE_ROOT = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(PACKAGE_ROOT)
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
 
 BOT_NAME = "tamilwin_scraper"
 

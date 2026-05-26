@@ -13,12 +13,7 @@ import urllib.error
 
 
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
-_REPO_ROOT = os.path.dirname(PROJECT_DIR)
-SCRAPY_CWD = (
-    _REPO_ROOT
-    if os.path.isfile(os.path.join(_REPO_ROOT, "scrapy.cfg"))
-    else PROJECT_DIR
-)
+SCRAPY_CWD = PROJECT_DIR
 NEWS_JSON = os.path.join(PROJECT_DIR, "news.json")
 API_SYNC_URL = "http://localhost:4000/api/sync"
 

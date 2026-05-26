@@ -1,5 +1,5 @@
 """
-Run from repository root (folder that contains scrapy.cfg):
+Run from the repository root or from tamilwin_scraper/:
 
   python -m tamilwin_scraper.diagnose_classification
 
