@@ -97,6 +97,7 @@ class TamilwinSpider(scrapy.Spider):
             "url": response.url,
             "image_path": image_path,
             "full_text": full_text,
+            "source": "tamilwin",
         }
 
     def _download_image(self, image_url, article_url):
