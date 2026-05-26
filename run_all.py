@@ -17,7 +17,7 @@ SCRAPY_CWD = PROJECT_DIR
 NEWS_JSON = os.path.join(PROJECT_DIR, "news.json")
 API_SYNC_URL = os.environ.get(
     "API_SYNC_URL",
-    f"http://127.0.0.1:8000/api/sync",
+    f"https://api-new.techorin.xyz/api/sync",
 )
 
 
