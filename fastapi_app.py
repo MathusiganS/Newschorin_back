@@ -132,8 +132,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-if os.path.isdir(IMAGE_DIR):
-    app.mount("/images", StaticFiles(directory=IMAGE_DIR), name="images")
+os.makedirs(IMAGE_DIR, exist_ok=True)
+app.mount("/images", StaticFiles(directory=IMAGE_DIR), name="images")
 
 security = HTTPBasic()
 
@@ -152,7 +152,10 @@ def require_admin(credentials: HTTPBasicCredentials = Depends(security)) -> None
 def to_image_url(image_path: str) -> str:
     if not image_path:
         return ""
-    return f"/images/{os.path.basename(image_path)}"
+    if image_path.startswith(("http://", "https://", "/images/")):
+        return image_path
+    filename = image_path.replace("\\", "/").rstrip("/").split("/")[-1]
+    return f"/images/{filename}" if filename else ""
 
 
 def db_conn():
