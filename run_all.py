@@ -16,16 +16,40 @@ import urllib.error
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 SCRAPY_CWD = PROJECT_DIR
 NEWS_JSON = os.path.join(PROJECT_DIR, "news.json")
+IMAGE_DIR = os.path.join(PROJECT_DIR, "image")
 API_SYNC_URL = os.environ.get(
     "API_SYNC_URL",
     f"https://api-new.techorin.xyz/api/sync",
 )
 NEWS_JSON_BACKUP = os.path.join(PROJECT_DIR, "news.json.bak")
+IMAGE_LOG_SAMPLE_LIMIT = int(os.environ.get("IMAGE_LOG_SAMPLE_LIMIT", "25"))
 
 
 def _scraped_count(log):
     match = re.search(r"'item_scraped_count':\s*(\d+)", log)
     return int(match.group(1)) if match else 0
+
+
+def _log_image_dir(prefix="[run_all images]"):
+    exists = os.path.isdir(IMAGE_DIR)
+    print(f"{prefix} IMAGE_DIR={IMAGE_DIR}")
+    print(f"{prefix} exists={exists}")
+    if not exists:
+        return
+    try:
+        files = sorted(
+            name
+            for name in os.listdir(IMAGE_DIR)
+            if os.path.isfile(os.path.join(IMAGE_DIR, name))
+        )
+    except OSError as e:
+        print(f"{prefix} list failed: {e}")
+        return
+    print(f"{prefix} file_count={len(files)}")
+    for name in files[:IMAGE_LOG_SAMPLE_LIMIT]:
+        print(f"{prefix} file={name}")
+    if len(files) > IMAGE_LOG_SAMPLE_LIMIT:
+        print(f"{prefix} ... {len(files) - IMAGE_LOG_SAMPLE_LIMIT} more files")
 
 
 def run_spider(name):
@@ -87,6 +111,8 @@ def main():
         print("Restored previous news.json because this run scraped 0 items")
     elif os.path.exists(NEWS_JSON_BACKUP):
         os.remove(NEWS_JSON_BACKUP)
+
+    _log_image_dir()
 
     # Print summary
     print(f"\n{'=' * 60}")

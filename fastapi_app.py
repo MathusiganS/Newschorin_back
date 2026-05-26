@@ -51,6 +51,29 @@ RUN_ALL_PATH = os.path.join(PACKAGE_ROOT, "run_all.py")
 
 SCRAPE_INTERVAL_SECONDS = int(os.environ.get("SCRAPE_INTERVAL_SECONDS", "900"))
 ENABLE_SCRAPE_SCHEDULER = os.environ.get("ENABLE_SCRAPE_SCHEDULER", "1") != "0"
+IMAGE_LOG_SAMPLE_LIMIT = int(os.environ.get("IMAGE_LOG_SAMPLE_LIMIT", "25"))
+
+
+def _log_image_dir(prefix: str = "[images]") -> None:
+    exists = os.path.isdir(IMAGE_DIR)
+    print(f"{prefix} IMAGE_DIR={IMAGE_DIR}")
+    print(f"{prefix} exists={exists}")
+    if not exists:
+        return
+    try:
+        files = sorted(
+            name
+            for name in os.listdir(IMAGE_DIR)
+            if os.path.isfile(os.path.join(IMAGE_DIR, name))
+        )
+    except OSError as e:
+        print(f"{prefix} list failed: {e}")
+        return
+    print(f"{prefix} file_count={len(files)}")
+    for name in files[:IMAGE_LOG_SAMPLE_LIMIT]:
+        print(f"{prefix} file={name}")
+    if len(files) > IMAGE_LOG_SAMPLE_LIMIT:
+        print(f"{prefix} ... {len(files) - IMAGE_LOG_SAMPLE_LIMIT} more files")
 
 
 def _run_scraper_once() -> None:
@@ -58,11 +81,13 @@ def _run_scraper_once() -> None:
         return
     try:
         print("[scheduler] Starting scraper run_all.py")
+        _log_image_dir("[scheduler images before]")
         subprocess.run(
             [sys.executable, RUN_ALL_PATH],
             cwd=PACKAGE_ROOT,
             check=False,
         )
+        _log_image_dir("[scheduler images after]")
         print("[scheduler] Finished scraper run_all.py")
     except Exception:
         print("[scheduler] Scraper run_all.py failed")
@@ -108,9 +133,11 @@ def _ensure_schema(conn) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     os.makedirs(IMAGE_DIR, exist_ok=True)
+    _log_image_dir("[startup images]")
     try:
         conn = psycopg2.connect(DB_URL)
         _ensure_schema(conn)
+        _normalize_db_image_paths(conn)
         conn.close()
     except Exception:
         pass
@@ -153,9 +180,32 @@ def to_image_url(image_path: str) -> str:
     if not image_path:
         return ""
     if image_path.startswith(("http://", "https://", "/images/")):
+        if image_path.startswith("/images/"):
+            filename = image_path.replace("\\", "/").rstrip("/").split("/")[-1]
+            local_path = os.path.join(IMAGE_DIR, filename)
+            return f"/images/{filename}" if os.path.isfile(local_path) else ""
         return image_path
     filename = image_path.replace("\\", "/").rstrip("/").split("/")[-1]
-    return f"/images/{filename}" if filename else ""
+    local_path = os.path.join(IMAGE_DIR, filename)
+    return f"/images/{filename}" if filename and os.path.isfile(local_path) else ""
+
+
+def _normalize_db_image_paths(conn) -> int:
+    updated = 0
+    cur = conn.cursor()
+    cur.execute("SELECT id, image_path FROM news WHERE COALESCE(image_path, '') <> ''")
+    rows = cur.fetchall()
+    for row_id, image_path in rows:
+        normalized = to_image_url(image_path)
+        if normalized != image_path:
+            cur.execute(
+                "UPDATE news SET image_path = %s WHERE id = %s",
+                (normalized, row_id),
+            )
+            updated += 1
+    conn.commit()
+    cur.close()
+    return updated
 
 
 def db_conn():
@@ -326,7 +376,7 @@ def api_sync():
             try:
                 title = item.get("title") or ""
                 url = item.get("url") or ""
-                image_path = item.get("image_path") or ""
+                image_path = to_image_url(item.get("image_path") or "")
                 full_text = item.get("full_text") or ""
                 src = item.get("source") or "unknown"
                 category_ta = classify_article_for_pipeline(full_text, title)
@@ -402,19 +452,7 @@ def api_admin_normalize_images():
         raise HTTPException(status_code=500, detail=str(e))
     updated = 0
     try:
-        cur = conn.cursor()
-        cur.execute("SELECT id, image_path FROM news WHERE COALESCE(image_path, '') <> ''")
-        rows = cur.fetchall()
-        for row_id, image_path in rows:
-            normalized = to_image_url(image_path)
-            if normalized and normalized != image_path:
-                cur.execute(
-                    "UPDATE news SET image_path = %s WHERE id = %s",
-                    (normalized, row_id),
-                )
-                updated += 1
-        conn.commit()
-        cur.close()
+        updated = _normalize_db_image_paths(conn)
     finally:
         conn.close()
     return {"updated": updated}
@@ -452,7 +490,7 @@ def api_admin_news_list(status: Optional[str] = None):
                 "title": r[1],
                 "url": r[2],
                 "image": to_image_url(r[3] or ""),
-                "image_path": r[3] or "",
+                "image_path": to_image_url(r[3] or ""),
                 "full_text": r[4] or "",
                 "source": r[5] or "unknown",
                 "category_ta": r[6] or "",
@@ -489,7 +527,7 @@ def api_admin_news_detail(article_id: int):
             "title": row[1],
             "url": row[2],
             "image": to_image_url(row[3] or ""),
-            "image_path": row[3] or "",
+            "image_path": to_image_url(row[3] or ""),
             "full_text": row[4] or "",
             "source": row[5] or "unknown",
             "category_ta": row[6] or "",
@@ -516,7 +554,7 @@ def api_admin_news_update(article_id: int, body: AdminNewsUpdate):
         add("url", body.url)
     image_path = body.image_path if body.image_path is not None else body.image
     if image_path is not None:
-        add("image_path", image_path)
+        add("image_path", to_image_url(image_path))
     if body.full_text is not None:
         add("full_text", body.full_text)
     if body.source is not None:
