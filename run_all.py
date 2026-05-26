@@ -15,7 +15,10 @@ import urllib.error
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 SCRAPY_CWD = PROJECT_DIR
 NEWS_JSON = os.path.join(PROJECT_DIR, "news.json")
-API_SYNC_URL = "http://localhost:4000/api/sync"
+API_SYNC_URL = os.environ.get(
+    "API_SYNC_URL",
+    f"http://127.0.0.1:{os.environ.get('PORT', '4000')}/api/sync",
+)
 
 
 def run_spider(name):
@@ -99,8 +102,7 @@ def main():
             print(f"  Failed:   {sync_result.get('failed', '?')}")
     except urllib.error.URLError as e:
         print(f"  Sync skipped (API not running?): {e}")
-        print("  Start the API: uvicorn tamilwin_scraper.fastapi_app:app --port 4000")
-        print("  (from repo root). Then POST http://localhost:4000/api/sync")
+        print(f"  Then POST {API_SYNC_URL}")
 
     print(f"{'=' * 60}\n")
 
