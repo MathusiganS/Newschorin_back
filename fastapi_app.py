@@ -176,18 +176,17 @@ def require_admin(credentials: HTTPBasicCredentials = Depends(security)) -> None
         )
 
 
-def to_image_url(image_path: str) -> str:
+def normalize_image_path(image_path: str) -> str:
     if not image_path:
         return ""
-    if image_path.startswith(("http://", "https://", "/images/")):
-        if image_path.startswith("/images/"):
-            filename = image_path.replace("\\", "/").rstrip("/").split("/")[-1]
-            local_path = os.path.join(IMAGE_DIR, filename)
-            return f"/images/{filename}" if os.path.isfile(local_path) else ""
+    if image_path.startswith(("http://", "https://")):
         return image_path
     filename = image_path.replace("\\", "/").rstrip("/").split("/")[-1]
-    local_path = os.path.join(IMAGE_DIR, filename)
-    return f"/images/{filename}" if filename and os.path.isfile(local_path) else ""
+    return f"/images/{filename}" if filename else ""
+
+
+def to_image_url(image_path: str) -> str:
+    return normalize_image_path(image_path)
 
 
 def _normalize_db_image_paths(conn) -> int:
@@ -196,7 +195,7 @@ def _normalize_db_image_paths(conn) -> int:
     cur.execute("SELECT id, image_path FROM news WHERE COALESCE(image_path, '') <> ''")
     rows = cur.fetchall()
     for row_id, image_path in rows:
-        normalized = to_image_url(image_path)
+        normalized = normalize_image_path(image_path)
         if normalized != image_path:
             cur.execute(
                 "UPDATE news SET image_path = %s WHERE id = %s",
@@ -376,7 +375,7 @@ def api_sync():
             try:
                 title = item.get("title") or ""
                 url = item.get("url") or ""
-                image_path = to_image_url(item.get("image_path") or "")
+                image_path = normalize_image_path(item.get("image_path") or "")
                 full_text = item.get("full_text") or ""
                 src = item.get("source") or "unknown"
                 category_ta = classify_article_for_pipeline(full_text, title)
@@ -554,7 +553,7 @@ def api_admin_news_update(article_id: int, body: AdminNewsUpdate):
         add("url", body.url)
     image_path = body.image_path if body.image_path is not None else body.image
     if image_path is not None:
-        add("image_path", to_image_url(image_path))
+        add("image_path", normalize_image_path(image_path))
     if body.full_text is not None:
         add("full_text", body.full_text)
     if body.source is not None:
