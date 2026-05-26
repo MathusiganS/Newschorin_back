@@ -6,6 +6,7 @@ After scraping, syncs all items from news.json into the PostgreSQL database.
 
 import json
 import os
+import re
 import subprocess
 import sys
 import urllib.request
@@ -19,6 +20,12 @@ API_SYNC_URL = os.environ.get(
     "API_SYNC_URL",
     f"https://api-new.techorin.xyz/api/sync",
 )
+NEWS_JSON_BACKUP = os.path.join(PROJECT_DIR, "news.json.bak")
+
+
+def _scraped_count(log):
+    match = re.search(r"'item_scraped_count':\s*(\d+)", log)
+    return int(match.group(1)) if match else 0
 
 
 def run_spider(name):
@@ -35,32 +42,51 @@ def run_spider(name):
     )
     log = (result.stderr or "") + "\n" + (result.stdout or "")
     code = result.returncode
+    scraped_count = _scraped_count(log)
     # Scrapy can exit 0 while the async crawler task crashes; detect common failures.
     if code == 0 and (
         "ModuleNotFoundError" in log
         or "exception=ModuleNotFoundError" in log
         or "Error in download handler" in log
+        or "BrowserType.launch" in log
+        or "Executable doesn't exist" in log
+        or "playwright._impl._errors" in log
     ):
         code = 1
-    if code != 0:
+    if code != 0 or scraped_count == 0:
         tail = log.strip()[-3500:] if log.strip() else "(no log output)"
         print(tail)
-        print(f"\n  Spider '{name}' failed (exit treated as {code}).\n")
-    return code
+        if code != 0:
+            print(f"\n  Spider '{name}' failed (exit treated as {code}).\n")
+        else:
+            print(f"\n  Spider '{name}' finished but scraped 0 items.\n")
+    return code, scraped_count
 
 
 def main():
-    # Clear existing news.json for a fresh run
+    # Keep a backup so a blocked/empty scrape cannot wipe the last good data file.
     if os.path.exists(NEWS_JSON):
-        os.remove(NEWS_JSON)
-        print("Cleared existing news.json")
+        os.replace(NEWS_JSON, NEWS_JSON_BACKUP)
+        print("Backed up existing news.json")
 
     spiders = ["tamilwin", "virakesari", "lankasri"]
     results = {}
+    total_scraped = 0
 
     for spider in spiders:
-        code = run_spider(spider)
-        results[spider] = "OK" if code == 0 else f"exit code {code}"
+        code, scraped_count = run_spider(spider)
+        total_scraped += scraped_count
+        results[spider] = (
+            f"OK ({scraped_count} items)" if code == 0 else f"exit code {code}"
+        )
+
+    if total_scraped == 0 and os.path.exists(NEWS_JSON_BACKUP):
+        if os.path.exists(NEWS_JSON):
+            os.remove(NEWS_JSON)
+        os.replace(NEWS_JSON_BACKUP, NEWS_JSON)
+        print("Restored previous news.json because this run scraped 0 items")
+    elif os.path.exists(NEWS_JSON_BACKUP):
+        os.remove(NEWS_JSON_BACKUP)
 
     # Print summary
     print(f"\n{'=' * 60}")
