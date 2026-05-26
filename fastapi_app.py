@@ -394,6 +394,32 @@ def api_reclassify():
     return {"rows_seen": len(rows), "updated": updated, "errors": errors}
 
 
+@app.post("/api/admin/normalize-images", dependencies=[Depends(require_admin)])
+def api_admin_normalize_images():
+    try:
+        conn = db_conn()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    updated = 0
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT id, image_path FROM news WHERE COALESCE(image_path, '') <> ''")
+        rows = cur.fetchall()
+        for row_id, image_path in rows:
+            normalized = to_image_url(image_path)
+            if normalized and normalized != image_path:
+                cur.execute(
+                    "UPDATE news SET image_path = %s WHERE id = %s",
+                    (normalized, row_id),
+                )
+                updated += 1
+        conn.commit()
+        cur.close()
+    finally:
+        conn.close()
+    return {"updated": updated}
+
+
 @app.get("/api/admin/news", dependencies=[Depends(require_admin)])
 def api_admin_news_list(status: Optional[str] = None):
     status_norm = _normalize_status(status)

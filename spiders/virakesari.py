@@ -154,7 +154,7 @@ class VirakesariSpider(scrapy.Spider):
                 with open(filepath, "wb") as f:
                     f.write(resp.read())
 
-            return filepath
+            return f"/images/{filename}"
         except Exception as e:
             self.logger.warning(f"Failed to download image {image_url}: {e}")
             return ""
