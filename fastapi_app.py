@@ -186,7 +186,12 @@ def normalize_image_path(image_path: str) -> str:
 
 
 def to_image_url(image_path: str) -> str:
-    return normalize_image_path(image_path)
+    normalized = normalize_image_path(image_path)
+    if normalized.startswith("/images/"):
+        filename = normalized.rsplit("/", 1)[-1]
+        if not os.path.isfile(os.path.join(IMAGE_DIR, filename)):
+            return ""
+    return normalized
 
 
 def _normalize_db_image_paths(conn) -> int:
