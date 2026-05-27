@@ -35,6 +35,7 @@ from tamilwin_scraper.env import load_env_file
 from tamilwin_scraper.classifier import classify_article_for_pipeline, diagnose_classifier
 
 load_env_file()
+os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", "0")
 
 DB_URL = os.environ.get(
     "DATABASE_URL",
@@ -52,6 +53,7 @@ RUN_ALL_PATH = os.path.join(PACKAGE_ROOT, "run_all.py")
 SCRAPE_INTERVAL_SECONDS = int(os.environ.get("SCRAPE_INTERVAL_SECONDS", "900"))
 ENABLE_SCRAPE_SCHEDULER = os.environ.get("ENABLE_SCRAPE_SCHEDULER", "1") != "0"
 IMAGE_LOG_SAMPLE_LIMIT = int(os.environ.get("IMAGE_LOG_SAMPLE_LIMIT", "25"))
+PLAYWRIGHT_INSTALL_ON_START = os.environ.get("PLAYWRIGHT_INSTALL_ON_START", "1") != "0"
 
 
 def _log_image_dir(prefix: str = "[images]") -> None:
@@ -82,9 +84,20 @@ def _run_scraper_once() -> None:
     try:
         print("[scheduler] Starting scraper run_all.py")
         _log_image_dir("[scheduler images before]")
+        env = os.environ.copy()
+        env.setdefault("PLAYWRIGHT_BROWSERS_PATH", "0")
+        if PLAYWRIGHT_INSTALL_ON_START:
+            print("[scheduler] Ensuring Playwright Chromium is installed")
+            subprocess.run(
+                [sys.executable, "-m", "playwright", "install", "chromium"],
+                cwd=PACKAGE_ROOT,
+                env=env,
+                check=False,
+            )
         subprocess.run(
             [sys.executable, RUN_ALL_PATH],
             cwd=PACKAGE_ROOT,
+            env=env,
             check=False,
         )
         _log_image_dir("[scheduler images after]")

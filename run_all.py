@@ -13,6 +13,8 @@ import urllib.request
 import urllib.error
 
 
+os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", "0")
+
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 SCRAPY_CWD = PROJECT_DIR
 NEWS_JSON = os.path.join(PROJECT_DIR, "news.json")

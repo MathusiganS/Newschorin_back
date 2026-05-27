@@ -1,6 +1,8 @@
 import os
 import sys
 
+os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", "0")
+
 # Scrapy settings for tamilwin_scraper project
 
 PACKAGE_ROOT = os.path.dirname(os.path.abspath(__file__))
