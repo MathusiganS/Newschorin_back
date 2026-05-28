@@ -21,7 +21,7 @@ NEWS_JSON = os.path.join(PROJECT_DIR, "news.json")
 IMAGE_DIR = os.path.join(PROJECT_DIR, "image")
 API_SYNC_URL = os.environ.get(
     "API_SYNC_URL",
-    f"https://api-new.techorin.xyz/api/sync",
+    f"http://127.0.0.1:{os.environ.get('PORT', '4000')}/api/sync",
 )
 NEWS_JSON_BACKUP = os.path.join(PROJECT_DIR, "news.json.bak")
 IMAGE_LOG_SAMPLE_LIMIT = int(os.environ.get("IMAGE_LOG_SAMPLE_LIMIT", "25"))
@@ -141,6 +141,7 @@ def main():
     print(f"\n{'=' * 60}")
     print("  SYNCING TO DATABASE")
     print(f"{'=' * 60}")
+    print(f"  Sync URL: {API_SYNC_URL}")
     try:
         req = urllib.request.Request(
             API_SYNC_URL,
@@ -154,6 +155,11 @@ def main():
             print(f"  Inserted: {sync_result.get('inserted', '?')}")
             print(f"  Updated:  {sync_result.get('updated', '?')}")
             print(f"  Failed:   {sync_result.get('failed', '?')}")
+            print(f"  Paraphrased: {sync_result.get('paraphrased', '?')}")
+            print(f"  Reused:      {sync_result.get('paraphrase_reused', '?')}")
+            print(f"  Skipped:     {sync_result.get('paraphrase_skipped', '?')}")
+            if "paraphrased" not in sync_result:
+                print("  WARNING: /api/sync response is from old backend code or wrong API URL")
     except urllib.error.URLError as e:
         print(f"  Sync skipped (API not running?): {e}")
         print(f"  Then POST {API_SYNC_URL}")

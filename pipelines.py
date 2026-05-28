@@ -1,20 +1,9 @@
 import json
 import os
 
-import psycopg2
-
 from tamilwin_scraper.classifier import (
     classify_article_for_pipeline,
     diagnose_classifier,
-)
-from tamilwin_scraper.env import load_env_file
-
-
-load_env_file()
-
-DB_URL = os.environ.get(
-    "DATABASE_URL",
-    "postgresql://postgres:12345@localhost:5432/news_techorin",
 )
 
 
@@ -34,40 +23,6 @@ class SaveNewsPipeline:
                     self.existing_data = json.load(f)
             except (json.JSONDecodeError, IOError):
                 self.existing_data = []
-
-        # Connect to PostgreSQL (graceful fallback if unavailable)
-        self.db_available = False
-        self.conn = None
-        self.cur = None
-        try:
-            self.conn = psycopg2.connect(DB_URL)
-            self.cur = self.conn.cursor()
-            self.cur.execute("""
-                CREATE TABLE IF NOT EXISTS news (
-                    id SERIAL PRIMARY KEY,
-                    title TEXT NOT NULL,
-                    url TEXT UNIQUE NOT NULL,
-                    image_path TEXT DEFAULT '',
-                    full_text TEXT DEFAULT '',
-                    source TEXT DEFAULT '',
-                    category_ta TEXT DEFAULT '',
-                    status TEXT DEFAULT 'pending',
-                    created_at TIMESTAMP DEFAULT NOW()
-                )
-            """)
-            for stmt in (
-                "ALTER TABLE news ADD COLUMN IF NOT EXISTS source TEXT DEFAULT ''",
-                "ALTER TABLE news ADD COLUMN IF NOT EXISTS category_ta TEXT DEFAULT ''",
-                "ALTER TABLE news ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending'",
-            ):
-                try:
-                    self.cur.execute(stmt)
-                except Exception:
-                    pass
-            self.conn.commit()
-            self.db_available = True
-        except Exception as e:
-            spider.logger.warning(f"DB connection failed (continuing without DB): {e}")
 
         info = diagnose_classifier()
         if not info["classifier_path"]:
@@ -93,35 +48,6 @@ class SaveNewsPipeline:
         row["category_ta"] = classify_article_for_pipeline(ft, row.get("title") or "")
         item["category_ta"] = row["category_ta"]
         self.new_items.append(dict(item))
-
-        if self.db_available:
-            try:
-                self.cur.execute(
-                    """
-                    INSERT INTO news (title, url, image_path, full_text, source, category_ta, status)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (url) DO UPDATE SET
-                        title = EXCLUDED.title,
-                        image_path = EXCLUDED.image_path,
-                        full_text = EXCLUDED.full_text,
-                        source = EXCLUDED.source,
-                        category_ta = EXCLUDED.category_ta,
-                        status = news.status
-                    """,
-                    (
-                        row["title"],
-                        row["url"],
-                        row.get("image_path", ""),
-                        row.get("full_text", ""),
-                        row.get("source", spider.name),
-                        row.get("category_ta", ""),
-                        "pending",
-                    ),
-                )
-                self.conn.commit()
-            except Exception as e:
-                spider.logger.warning(f"DB insert error: {e}")
-                self.conn.rollback()
 
         return item
 
@@ -152,8 +78,3 @@ class SaveNewsPipeline:
             f"Saved {len(unique_items)} unique items to news.json "
             f"({len(self.new_items)} new from {spider.name})"
         )
-
-        if self.cur:
-            self.cur.close()
-        if self.conn:
-            self.conn.close()
