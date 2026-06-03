@@ -134,6 +134,7 @@ def _ensure_schema(conn) -> None:
             source TEXT DEFAULT '',
             category_ta TEXT DEFAULT '',
             status TEXT DEFAULT 'pending',
+            view_count INTEGER DEFAULT 0,
             created_at TIMESTAMP DEFAULT NOW()
         )
         """
@@ -144,6 +145,8 @@ def _ensure_schema(conn) -> None:
         "ALTER TABLE news ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending'",
         "ALTER TABLE news ADD COLUMN IF NOT EXISTS original_title TEXT DEFAULT ''",
         "ALTER TABLE news ADD COLUMN IF NOT EXISTS original_full_text TEXT DEFAULT ''",
+        "ALTER TABLE news ADD COLUMN IF NOT EXISTS view_count INTEGER DEFAULT 0",
+        "ALTER TABLE news ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()",
     ):
         try:
             cur.execute(stmt)
@@ -250,6 +253,25 @@ def json_datetime(value: Any) -> Optional[str]:
     return str(value)
 
 
+def parse_scraped_datetime(value: Any) -> Optional[str]:
+    """Return a DB-friendly timestamp string from scraper JSON, or None."""
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return datetime.combine(value, datetime.min.time()).isoformat()
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(text).isoformat()
+    except ValueError:
+        return None
+
+
 def _paraphrase_tamil_news(title: str, full_text: str) -> tuple[str, str, bool]:
     if not GEMINI_API_KEY or (not title and not full_text):
         if not GEMINI_API_KEY:
@@ -262,8 +284,11 @@ Paraphrase the following Tamil news title and full text without changing the ori
 Rules:
 1. Do not change names, dates, numbers, locations, organizations, or quotes.
 2. Do not add new information.
-3. Keep the tone professional and suitable for a news website.
-4. Return only valid JSON with exactly these keys: title, full_text.
+3. Rewrite the title as a fresh Tamil news headline. Do not copy the original title word-for-word.
+4. Keep the title concise, natural, professional, and suitable for a news website.
+5. Keep the title meaning exactly the same as the original.
+6. Keep the body text professional and suitable for a news website.
+7. Return only valid JSON with exactly these keys: title, full_text.
 
 Original title:
 {title}
@@ -301,11 +326,90 @@ Original full_text:
         parsed = json.loads(text)
         new_title = str(parsed.get("title") or title).strip()
         new_full_text = str(parsed.get("full_text") or full_text).strip()
+        if _titles_too_similar(title, new_title):
+            new_title = _paraphrase_tamil_title(title, full_text)
         print("[paraphrase] completed")
         return new_title or title, new_full_text or full_text, True
     except Exception as e:
         print(f"[paraphrase] skipped: {e}")
         return title, full_text, False
+
+
+def _titles_too_similar(original: str, rewritten: str) -> bool:
+    original_norm = " ".join((original or "").split()).strip()
+    rewritten_norm = " ".join((rewritten or "").split()).strip()
+    if not original_norm or not rewritten_norm:
+        return True
+    if original_norm == rewritten_norm:
+        return True
+    original_words = set(original_norm.split())
+    rewritten_words = set(rewritten_norm.split())
+    if not original_words:
+        return True
+    overlap = len(original_words & rewritten_words) / max(1, len(original_words))
+    return overlap >= 0.85
+
+
+def _paraphrase_tamil_title(title: str, full_text: str = "") -> str:
+    if not GEMINI_API_KEY or not title:
+        return title
+
+    context = (full_text or "").strip()
+    if len(context) > 1200:
+        context = context[:1200]
+    prompt = f"""
+Rewrite only this Tamil news title as a fresh headline.
+
+Rules:
+1. Preserve the same facts, names, dates, numbers, places, and meaning.
+2. Do not add any new information.
+3. Do not copy the original wording.
+4. Keep it natural, professional, and concise for a Tamil news website.
+5. Return only valid JSON with exactly this key: title.
+
+Original title:
+{title}
+
+Article context:
+{context}
+""".strip()
+    url = (
+        f"https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+    )
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": max(GEMINI_TEMPERATURE, 0.45),
+            "topP": GEMINI_TOP_P,
+            "maxOutputTokens": 220,
+            "responseMimeType": "application/json",
+        },
+    }
+    try:
+        resp = requests.post(url, json=payload, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        text = (
+            data.get("candidates", [{}])[0]
+            .get("content", {})
+            .get("parts", [{}])[0]
+            .get("text", "")
+        )
+        if text.strip().startswith("```"):
+            text = text.strip().strip("`")
+            if text.lower().startswith("json"):
+                text = text[4:].strip()
+        parsed = json.loads(text)
+        new_title = str(parsed.get("title") or "").strip()
+        if new_title and not _titles_too_similar(title, new_title):
+            print("[paraphrase:title] completed")
+            return new_title
+        print("[paraphrase:title] kept original: title rewrite too similar")
+        return new_title or title
+    except Exception as e:
+        print(f"[paraphrase:title] skipped: {e}")
+        return title
 
 
 class ClassifyRequest(BaseModel):
@@ -371,12 +475,15 @@ def api_admin_paraphrase_status():
 def api_news_list(
     source: Optional[str] = None,
     category_ta: Optional[str] = None,
+    sort: Optional[str] = None,
+    limit: Optional[int] = None,
 ):
     try:
         conn = db_conn()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     try:
+        _ensure_schema(conn)
         cur = conn.cursor()
         where_parts: list[str] = []
         params: list[Any] = []
@@ -389,14 +496,77 @@ def api_news_list(
         where_parts.append("status = %s")
         params.append("approved")
         where_sql = (" WHERE " + " AND ".join(where_parts)) if where_parts else ""
+        order_sql = "ORDER BY created_at DESC, id DESC"
+        if (sort or "").lower() in {"trending", "popular", "views"}:
+            order_sql = "ORDER BY view_count DESC, created_at DESC, id DESC"
+        limit_sql = ""
+        if limit is not None:
+            limit_sql = "LIMIT %s"
+            params.append(max(1, min(limit, 100)))
         cur.execute(
             f"""
-            SELECT id, title, image_path, source, category_ta, created_at
+            SELECT id, title, image_path, source, category_ta, created_at, view_count, full_text
             FROM news
             {where_sql}
-            ORDER BY created_at DESC, id DESC
+            {order_sql}
+            {limit_sql}
             """,
             params,
+        )
+        rows = cur.fetchall()
+        cur.close()
+        if (sort or "").lower() in {"trending", "popular", "views"}:
+            print(
+                "[trending] /api/news sort=%s limit=%s -> %s"
+                % (
+                    sort,
+                    limit,
+                    [
+                        {
+                            "id": row[0],
+                            "views": row[6] or 0,
+                            "title": (row[1] or "")[:60],
+                        }
+                        for row in rows
+                    ],
+                ),
+                flush=True,
+            )
+        return [
+            {
+                "id": r[0],
+                "title": r[1],
+                "image": to_image_url(r[2] or ""),
+                "source": r[3] or "unknown",
+                "category_ta": r[4] or "",
+                "created_at": json_datetime(r[5]) or "",
+                "view_count": r[6] or 0,
+                "excerpt": ((r[7] or "").strip()[:140] + ("..." if len((r[7] or "").strip()) > 140 else "")),
+            }
+            for r in rows
+        ]
+    finally:
+        conn.close()
+
+
+def _popular_news(limit: int = 4) -> list[dict[str, Any]]:
+    limit = max(1, min(limit, 20))
+    try:
+        conn = db_conn()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    try:
+        _ensure_schema(conn)
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, title, image_path, source, category_ta, created_at, view_count
+            FROM news
+            WHERE status = 'approved'
+            ORDER BY view_count DESC, created_at DESC, id DESC
+            LIMIT %s
+            """,
+            (limit,),
         )
         rows = cur.fetchall()
         cur.close()
@@ -408,11 +578,82 @@ def api_news_list(
                 "source": r[3] or "unknown",
                 "category_ta": r[4] or "",
                 "created_at": json_datetime(r[5]) or "",
+                "view_count": r[6] or 0,
             }
             for r in rows
         ]
     finally:
         conn.close()
+
+
+@app.get("/api/news/popular")
+def api_news_popular(limit: int = 4):
+    rows = _popular_news(limit)
+    print(
+        "[popular] /api/news/popular limit=%s -> %s"
+        % (
+            max(1, min(limit, 20)),
+            [
+                {
+                    "id": row["id"],
+                    "views": row["view_count"],
+                    "title": (row["title"] or "")[:60],
+                }
+                for row in rows
+            ],
+        ),
+        flush=True,
+    )
+    return rows
+
+
+@app.get("/api/news/trending")
+def api_news_trending(limit: int = 4):
+    return api_news_popular(limit)
+
+
+def _increment_article_view(article_id: int, event_source: str) -> dict[str, Any]:
+    try:
+        conn = db_conn()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    try:
+        _ensure_schema(conn)
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE news
+            SET view_count = COALESCE(view_count, 0) + 1
+            WHERE id = %s AND status = 'approved'
+            RETURNING id, title, status, view_count
+            """,
+            (article_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            conn.rollback()
+            cur.close()
+            print(
+                "[view_count] %s missing id=%s"
+                % (event_source, article_id),
+                flush=True,
+            )
+            raise HTTPException(status_code=404, detail="Article not found")
+        conn.commit()
+        cur.close()
+        print(
+            "[view_count] POST /api/news/%s/view incremented view_count=%s status=%s title=%s"
+            % (row[0], row[3] or 0, row[2] or "", (row[1] or "")[:80]),
+            flush=True,
+        )
+        return {"id": row[0], "status": row[2] or "", "view_count": row[3] or 0}
+    finally:
+        conn.close()
+
+
+@app.post("/api/news/{article_id:int}/view")
+def api_news_track_view(article_id: int):
+    return _increment_article_view(article_id, "detail")
 
 
 @app.get("/api/news/{article_id:int}")
@@ -422,18 +663,21 @@ def api_news_detail(article_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     try:
+        _ensure_schema(conn)
         cur = conn.cursor()
         cur.execute(
             """
-            SELECT id, title, url, image_path, full_text, source, category_ta, created_at
-            FROM news WHERE id = %s AND status = 'approved'
+            SELECT id, title, url, image_path, full_text, source, category_ta, created_at, view_count
+            FROM news
+            WHERE id = %s AND status = 'approved'
             """,
             (article_id,),
         )
         row = cur.fetchone()
-        cur.close()
         if not row:
+            cur.close()
             raise HTTPException(status_code=404, detail="Article not found")
+        cur.close()
         return {
             "id": row[0],
             "title": row[1],
@@ -443,6 +687,7 @@ def api_news_detail(article_id: int):
             "source": row[5] or "unknown",
             "category_ta": row[6] or "",
             "created_at": json_datetime(row[7]) or "",
+            "view_count": row[8] or 0,
         }
     finally:
         conn.close()
@@ -474,6 +719,7 @@ def api_sync():
                 url = item.get("url") or ""
                 image_path = normalize_image_path(item.get("image_path") or "")
                 original_full_text = item.get("original_full_text") or item.get("full_text") or ""
+                scraped_created_at = parse_scraped_datetime(item.get("created_at"))
                 cur.execute(
                     """
                     SELECT title, full_text, original_title, original_full_text
@@ -493,6 +739,8 @@ def api_sync():
                 ):
                     title = existing[0] or original_title
                     full_text = existing[1] or original_full_text
+                    if _titles_too_similar(original_title, title):
+                        title = _paraphrase_tamil_title(original_title, full_text)
                     paraphrase_reused += 1
                 else:
                     title, full_text, did_paraphrase = _paraphrase_tamil_news(
@@ -509,9 +757,9 @@ def api_sync():
                     """
                     INSERT INTO news (
                         title, url, image_path, full_text, original_title,
-                        original_full_text, source, category_ta, status
+                        original_full_text, source, category_ta, status, created_at
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s::timestamp, NOW()))
                     ON CONFLICT (url) DO UPDATE SET
                         title = EXCLUDED.title,
                         image_path = EXCLUDED.image_path,
@@ -520,7 +768,8 @@ def api_sync():
                         original_full_text = EXCLUDED.original_full_text,
                         source = EXCLUDED.source,
                         category_ta = EXCLUDED.category_ta,
-                        status = news.status
+                        status = news.status,
+                        created_at = COALESCE(%s::timestamp, news.created_at)
                     RETURNING (xmax = 0) AS is_insert
                     """,
                     (
@@ -533,6 +782,8 @@ def api_sync():
                         src,
                         category_ta,
                         "pending",
+                        scraped_created_at,
+                        scraped_created_at,
                     ),
                 )
                 if cur.fetchone()[0]:
@@ -652,6 +903,60 @@ def api_admin_paraphrase_news():
                 updated += 1
             except Exception as e:
                 print(f"[paraphrase] row {row_id} failed: {e}")
+                errors += 1
+        conn.commit()
+        cur.close()
+    finally:
+        conn.close()
+    return {"rows_seen": len(rows), "updated": updated, "skipped": skipped, "errors": errors}
+
+
+@app.post("/api/admin/paraphrase-titles", dependencies=[Depends(require_admin)])
+def api_admin_paraphrase_titles():
+    if not GEMINI_API_KEY:
+        raise HTTPException(status_code=400, detail="GEMINI_API_KEY is not configured")
+    try:
+        conn = db_conn()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    updated = 0
+    skipped = 0
+    errors = 0
+    rows: list[Any] = []
+    try:
+        _ensure_schema(conn)
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, title, full_text, original_title, original_full_text
+            FROM news
+            ORDER BY id
+            """
+        )
+        rows = list(cur.fetchall())
+        for row_id, title, full_text, original_title, original_full_text in rows:
+            src_title = original_title or title or ""
+            context = original_full_text or full_text or ""
+            if not src_title:
+                skipped += 1
+                continue
+            try:
+                new_title = _paraphrase_tamil_title(src_title, context)
+                if not new_title or new_title == title:
+                    skipped += 1
+                    continue
+                cur.execute(
+                    """
+                    UPDATE news
+                    SET title = %s,
+                        original_title = %s
+                    WHERE id = %s
+                    """,
+                    (new_title, src_title, row_id),
+                )
+                updated += 1
+            except Exception as e:
+                print(f"[paraphrase:title] row {row_id} failed: {e}")
                 errors += 1
         conn.commit()
         cur.close()

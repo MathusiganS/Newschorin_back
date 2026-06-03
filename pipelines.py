@@ -53,7 +53,7 @@ class SaveNewsPipeline:
 
     def close_spider(self, spider):
         # Merge existing + new items, deduplicate by URL
-        all_items = self.existing_data + self.new_items
+        all_items = self.new_items + self.existing_data
         seen_urls = set()
         unique_items = []
         for item in all_items:

@@ -5,6 +5,8 @@ import urllib.request
 
 import scrapy
 
+from tamilwin_scraper.spiders.date_utils import extract_published_at
+
 # Directory to save downloaded images
 IMAGE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "image")
 
@@ -93,6 +95,7 @@ class TamilwinSpider(scrapy.Spider):
             "image_path": image_url,
             "full_text": full_text,
             "source": "tamilwin",
+            "created_at": extract_published_at(response),
         }
 
     def _download_image(self, image_url, article_url):
