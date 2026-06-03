@@ -191,6 +191,21 @@ app.mount("/images", StaticFiles(directory=IMAGE_DIR), name="images")
 security = HTTPBasic()
 
 
+@app.get("/")
+def api_root():
+    return {
+        "ok": True,
+        "service": "Tamil News API",
+        "docs": "/docs",
+        "health": "/health",
+    }
+
+
+@app.get("/health")
+def api_health():
+    return {"ok": True}
+
+
 def require_admin(credentials: HTTPBasicCredentials = Depends(security)) -> None:
     user_ok = secrets.compare_digest(credentials.username, ADMIN_USER)
     pass_ok = secrets.compare_digest(credentials.password, ADMIN_PASS)

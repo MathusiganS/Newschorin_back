@@ -33,6 +33,6 @@
       "libcairo2",
       "libasound2"
     ],
-    "startCommand": "sh -c \"export PLAYWRIGHT_BROWSERS_PATH=0; python -m playwright install chromium; ln -sfn /app /tmp/tamilwin_scraper; exec uvicorn tamilwin_scraper.fastapi_app:app --host 0.0.0.0 --port $PORT\""
+    "startCommand": "sh -c \"export PLAYWRIGHT_BROWSERS_PATH=0; export PYTHONPATH=/app:/tmp:$PYTHONPATH; python -m playwright install chromium; ln -sfn /app /tmp/tamilwin_scraper; exec uvicorn tamilwin_scraper.fastapi_app:app --host 0.0.0.0 --port $PORT\""
   }
 }
