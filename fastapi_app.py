@@ -321,11 +321,12 @@ Paraphrase the following Tamil news title and full text without changing the ori
 Rules:
 1. Do not change names, dates, numbers, locations, organizations, or quotes.
 2. Do not add new information.
-3. Rewrite the title as a fresh Tamil news headline. Do not copy the original title word-for-word.
-4. Keep the title concise, natural, professional, and suitable for a news website.
-5. Keep the title meaning exactly the same as the original.
-6. Keep the body text professional and suitable for a news website.
-7. Return only valid JSON with exactly these keys: title, full_text.
+3. Do  not show the news source in the title or full_text.
+4. Rewrite the title as a fresh Tamil news headline. Do not copy the original title word-for-word.
+5. Keep the title concise, natural, professional, and suitable for a news website.
+6. Keep the title meaning exactly the same as the original.
+7. Keep the body text professional and suitable for a news website.
+8. Return only valid JSON with exactly these keys: title, full_text.
 
 Original title:
 {title}
