@@ -39,7 +39,7 @@ def _parse_datetime(value: str) -> str:
         parsed = datetime.fromisoformat(iso_candidate)
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=LOCAL_TZ)
-        return parsed.astimezone(timezone.utc).isoformat()
+        return parsed.astimezone(LOCAL_TZ).isoformat()
     except ValueError:
         pass
 
@@ -61,7 +61,7 @@ def _parse_datetime(value: str) -> str:
     ):
         try:
             parsed = datetime.strptime(raw, fmt).replace(tzinfo=LOCAL_TZ)
-            return parsed.astimezone(timezone.utc).isoformat()
+            return parsed.astimezone(LOCAL_TZ).isoformat()
         except ValueError:
             continue
 
@@ -69,13 +69,13 @@ def _parse_datetime(value: str) -> str:
         parsed = parsedate_to_datetime(raw)
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=LOCAL_TZ)
-        return parsed.astimezone(timezone.utc).isoformat()
+        return parsed.astimezone(LOCAL_TZ).isoformat()
     except (TypeError, ValueError, IndexError, OverflowError):
         return ""
 
 
 def extract_published_at(response) -> str:
-    """Return article publish/update datetime as an ISO UTC string when available."""
+    """Return article publish/update datetime as an ISO Sri Lanka time string."""
     candidates: list[str] = []
 
     for block in response.css('script[type="application/ld+json"]::text').getall():

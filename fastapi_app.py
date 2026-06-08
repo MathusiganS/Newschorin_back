@@ -15,7 +15,7 @@ import sys
 import subprocess
 import requests
 from contextlib import asynccontextmanager
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 
 # So `uvicorn fastapi_app:app` works when the shell cwd is tamilwin_scraper/
@@ -60,6 +60,7 @@ SCRAPE_INTERVAL_SECONDS = int(os.environ.get("SCRAPE_INTERVAL_SECONDS", "900"))
 ENABLE_SCRAPE_SCHEDULER = os.environ.get("ENABLE_SCRAPE_SCHEDULER", "1") != "0"
 IMAGE_LOG_SAMPLE_LIMIT = int(os.environ.get("IMAGE_LOG_SAMPLE_LIMIT", "25"))
 PLAYWRIGHT_INSTALL_ON_START = os.environ.get("PLAYWRIGHT_INSTALL_ON_START", "1") != "0"
+SRI_LANKA_TZ = timezone(timedelta(hours=5, minutes=30))
 
 
 def _log_image_dir(prefix: str = "[images]") -> None:
@@ -135,7 +136,7 @@ def _ensure_schema(conn) -> None:
             category_ta TEXT DEFAULT '',
             status TEXT DEFAULT 'pending',
             view_count INTEGER DEFAULT 0,
-            created_at TIMESTAMP DEFAULT NOW()
+            created_at TIMESTAMP DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Colombo')
         )
         """
     )
@@ -146,12 +147,19 @@ def _ensure_schema(conn) -> None:
         "ALTER TABLE news ADD COLUMN IF NOT EXISTS original_title TEXT DEFAULT ''",
         "ALTER TABLE news ADD COLUMN IF NOT EXISTS original_full_text TEXT DEFAULT ''",
         "ALTER TABLE news ADD COLUMN IF NOT EXISTS view_count INTEGER DEFAULT 0",
-        "ALTER TABLE news ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()",
+        "ALTER TABLE news ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Colombo')",
     ):
         try:
             cur.execute(stmt)
         except Exception:
             pass
+    try:
+        cur.execute(
+            "ALTER TABLE news ALTER COLUMN created_at SET DEFAULT "
+            "(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Colombo')"
+        )
+    except Exception:
+        pass
     conn.commit()
     cur.close()
 
@@ -262,9 +270,17 @@ def json_datetime(value: Any) -> Optional[str]:
     if value is None:
         return None
     if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=SRI_LANKA_TZ)
+        else:
+            value = value.astimezone(SRI_LANKA_TZ)
         return value.isoformat()
     if isinstance(value, date):
-        return value.isoformat()
+        return datetime.combine(
+            value,
+            datetime.min.time(),
+            tzinfo=SRI_LANKA_TZ,
+        ).isoformat()
     return str(value)
 
 
@@ -273,7 +289,10 @@ def parse_scraped_datetime(value: Any) -> Optional[str]:
     if not value:
         return None
     if isinstance(value, datetime):
-        return value.isoformat()
+        parsed = value
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=SRI_LANKA_TZ)
+        return parsed.astimezone(SRI_LANKA_TZ).replace(tzinfo=None).isoformat()
     if isinstance(value, date):
         return datetime.combine(value, datetime.min.time()).isoformat()
     text = str(value).strip()
@@ -282,7 +301,10 @@ def parse_scraped_datetime(value: Any) -> Optional[str]:
     if text.endswith("Z"):
         text = text[:-1] + "+00:00"
     try:
-        return datetime.fromisoformat(text).isoformat()
+        parsed = datetime.fromisoformat(text)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=SRI_LANKA_TZ)
+        return parsed.astimezone(SRI_LANKA_TZ).replace(tzinfo=None).isoformat()
     except ValueError:
         return None
 
@@ -1104,7 +1126,7 @@ def api_admin_news_update(article_id: int, body: AdminNewsUpdate):
     if body.category_ta is not None:
         add("category_ta", body.category_ta)
     if body.created_at is not None:
-        add("created_at", body.created_at)
+        add("created_at", parse_scraped_datetime(body.created_at))
     if status_norm is not None:
         add("status", status_norm)
 

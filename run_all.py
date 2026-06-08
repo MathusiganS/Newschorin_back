@@ -1,5 +1,5 @@
 """
-Run all three news spiders (tamilwin, virakesari, lankasri) sequentially.
+Run all news spiders sequentially.
 Results are merged into tamilwin_scraper/news.json with duplicate removal.
 After scraping, syncs all items from news.json into the PostgreSQL database.
 """
@@ -95,7 +95,7 @@ def main():
         os.replace(NEWS_JSON, NEWS_JSON_BACKUP)
         print("Backed up existing news.json")
 
-    spiders = ["tamilwin", "virakesari", "lankasri"]
+    spiders = ["tamilwin", "virakesari", "lankasri", "newswire"]
     results = {}
     total_scraped = 0
 
