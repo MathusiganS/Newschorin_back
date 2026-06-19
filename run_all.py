@@ -7,15 +7,23 @@ After scraping, syncs all items from news.json into the PostgreSQL database.
 import json
 import os
 import re
+import base64
 import subprocess
 import sys
 import urllib.request
 import urllib.error
 
+PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+REPOSITORY_ROOT = os.path.dirname(PROJECT_DIR)
+if REPOSITORY_ROOT not in sys.path:
+    sys.path.insert(0, REPOSITORY_ROOT)
 
+from tamilwin_scraper.env import load_env_file
+
+
+load_env_file()
 os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", "0")
 
-PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 SCRAPY_CWD = PROJECT_DIR
 NEWS_JSON = os.path.join(PROJECT_DIR, "news.json")
 IMAGE_DIR = os.path.join(PROJECT_DIR, "image")
@@ -23,6 +31,19 @@ API_SYNC_URL = os.environ.get(
     "API_SYNC_URL",
     f"http://127.0.0.1:{os.environ.get('PORT', '4000')}/api/sync",
 )
+ADMIN_USER = os.environ.get("ADMIN_USER", "admin")
+ADMIN_PASS = os.environ.get("ADMIN_PASS", "admin")
+SYNC_API_KEY = os.environ.get("SYNC_API_KEY", "")
+SYNC_REQUEST_TIMEOUT_SECONDS = max(
+    60,
+    int(os.environ.get("SYNC_REQUEST_TIMEOUT_SECONDS", "600")),
+)
+SKIP_API_SYNC = os.environ.get("SKIP_API_SYNC", "0").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 NEWS_JSON_BACKUP = os.path.join(PROJECT_DIR, "news.json.bak")
 IMAGE_LOG_SAMPLE_LIMIT = int(os.environ.get("IMAGE_LOG_SAMPLE_LIMIT", "25"))
 
@@ -137,19 +158,35 @@ def main():
     else:
         print("\n  news.json was not created (all spiders may have failed)")
 
+    if SKIP_API_SYNC:
+        print("\n  API sync delegated to the scheduler service.")
+        print(f"{'=' * 60}\n")
+        return
+
     # Sync news.json into PostgreSQL via the API
     print(f"\n{'=' * 60}")
     print("  SYNCING TO DATABASE")
     print(f"{'=' * 60}")
     print(f"  Sync URL: {API_SYNC_URL}")
     try:
+        headers = {"Content-Type": "application/json"}
+        if SYNC_API_KEY:
+            headers["X-API-Key"] = SYNC_API_KEY
+        else:
+            credentials = base64.b64encode(
+                f"{ADMIN_USER}:{ADMIN_PASS}".encode("utf-8")
+            ).decode("ascii")
+            headers["Authorization"] = f"Basic {credentials}"
         req = urllib.request.Request(
             API_SYNC_URL,
             data=b"{}",
-            headers={"Content-Type": "application/json"},
+            headers=headers,
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(
+            req,
+            timeout=SYNC_REQUEST_TIMEOUT_SECONDS,
+        ) as resp:
             sync_result = json.loads(resp.read().decode())
             print(f"  Total:    {sync_result.get('total', '?')}")
             print(f"  Inserted: {sync_result.get('inserted', '?')}")
@@ -160,8 +197,12 @@ def main():
             print(f"  Skipped:     {sync_result.get('paraphrase_skipped', '?')}")
             if "paraphrased" not in sync_result:
                 print("  WARNING: /api/sync response is from old backend code or wrong API URL")
-    except urllib.error.URLError as e:
-        print(f"  Sync skipped (API not running?): {e}")
+    except (TimeoutError, urllib.error.URLError) as e:
+        print(f"  Sync request failed: {e}")
+        print(
+            "  The database sync may still be running on the backend. "
+            "Check backend logs before retrying."
+        )
         print(f"  Then POST {API_SYNC_URL}")
 
     print(f"{'=' * 60}\n")
