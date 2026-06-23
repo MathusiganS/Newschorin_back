@@ -9,10 +9,16 @@ Run either:
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import json
 import os
+import random
 import sys
 import subprocess
+import threading
+import time
+import uuid
 import requests
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
@@ -25,8 +31,9 @@ if _repo_root not in sys.path:
     sys.path.insert(0, _repo_root)
 
 import psycopg2
+import jwt
 import secrets
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
@@ -45,11 +52,122 @@ DB_URL = os.environ.get(
 
 ADMIN_USER = os.environ.get("ADMIN_USER", "admin")
 ADMIN_PASS = os.environ.get("ADMIN_PASS", "admin")
+APP_ENV = os.environ.get("APP_ENV", "development").lower()
+JWT_SECRET = os.environ.get("JWT_SECRET", "")
+JWT_ALGORITHM = os.environ.get("JWT_ALGORITHM", "HS256")
+JWT_EXPIRE_MINUTES = int(os.environ.get("JWT_EXPIRE_MINUTES", "480"))
+COOKIE_NAME = os.environ.get("COOKIE_NAME", "admin_session")
+COOKIE_SECURE = os.environ.get(
+    "COOKIE_SECURE",
+    "1" if APP_ENV == "production" else "0",
+) not in {"0", "false", "False", "no", "NO"}
+CORS_ORIGINS = [
+    origin.strip().rstrip("/")
+    for origin in os.environ.get(
+        "CORS_ORIGINS",
+        "http://localhost:3000,http://127.0.0.1:3000",
+    ).split(",")
+    if origin.strip()
+]
+if APP_ENV == "production" and not JWT_SECRET:
+    raise RuntimeError("JWT_SECRET is required when APP_ENV=production")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL") or os.environ.get("model", "gemini-2.5-flash-lite")
 GEMINI_TEMPERATURE = float(os.environ.get("GEMINI_TEMPERATURE") or os.environ.get("temperature", "0.3"))
 GEMINI_TOP_P = float(os.environ.get("GEMINI_TOP_P") or os.environ.get("topP", "0.8"))
 GEMINI_MAX_OUTPUT_TOKENS = int(os.environ.get("GEMINI_MAX_OUTPUT_TOKENS") or os.environ.get("maxOutputTokens", "1200"))
+GEMINI_MIN_REQUEST_INTERVAL_SECONDS = float(os.environ.get("GEMINI_MIN_REQUEST_INTERVAL_SECONDS", "4.5"))
+GEMINI_MAX_RETRIES = int(os.environ.get("GEMINI_MAX_RETRIES", "10"))
+GEMINI_RETRY_BASE_SECONDS = float(os.environ.get("GEMINI_RETRY_BASE_SECONDS", "5"))
+GEMINI_RETRY_MAX_SECONDS = float(os.environ.get("GEMINI_RETRY_MAX_SECONDS", "60"))
+
+_gemini_request_lock = threading.Lock()
+_gemini_last_request_at = 0.0
+
+
+class ParaphraseError(RuntimeError):
+    pass
+
+
+def _gemini_generate_json(payload: dict[str, Any], timeout: int) -> dict[str, Any]:
+    """Call Gemini with global pacing and retries without exposing the API key."""
+    global _gemini_last_request_at
+    url = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{GEMINI_MODEL}:generateContent"
+    )
+    last_error = "unknown Gemini error"
+    attempts = max(1, GEMINI_MAX_RETRIES + 1)
+
+    for attempt in range(1, attempts + 1):
+        try:
+            with _gemini_request_lock:
+                wait_for = GEMINI_MIN_REQUEST_INTERVAL_SECONDS - (
+                    time.monotonic() - _gemini_last_request_at
+                )
+                if wait_for > 0:
+                    time.sleep(wait_for)
+                _gemini_last_request_at = time.monotonic()
+                response = requests.post(
+                    url,
+                    headers={"x-goog-api-key": GEMINI_API_KEY},
+                    json=payload,
+                    timeout=timeout,
+                )
+
+            if response.status_code == 429 or 500 <= response.status_code < 600:
+                last_error = f"Gemini HTTP {response.status_code}"
+                if attempt < attempts:
+                    retry_after = response.headers.get("Retry-After", "")
+                    try:
+                        delay = float(retry_after)
+                    except (TypeError, ValueError):
+                        delay = min(
+                            GEMINI_RETRY_MAX_SECONDS,
+                            GEMINI_RETRY_BASE_SECONDS * (2 ** (attempt - 1)),
+                        ) + random.uniform(0, 1.5)
+                    print(
+                        f"[paraphrase] rate limited/transient error; "
+                        f"retry {attempt}/{GEMINI_MAX_RETRIES} in {delay:.1f}s"
+                    )
+                    time.sleep(max(0, delay))
+                    continue
+
+            response.raise_for_status()
+            data = response.json()
+            text = (
+                data.get("candidates", [{}])[0]
+                .get("content", {})
+                .get("parts", [{}])[0]
+                .get("text", "")
+            )
+            if text.strip().startswith("```"):
+                text = text.strip().strip("`")
+                if text.lower().startswith("json"):
+                    text = text[4:].strip()
+            parsed = json.loads(text)
+            if not isinstance(parsed, dict):
+                raise ValueError("Gemini response was not a JSON object")
+            return parsed
+        except (requests.Timeout, requests.ConnectionError, ValueError, json.JSONDecodeError) as e:
+            last_error = type(e).__name__
+            if attempt < attempts:
+                delay = min(
+                    GEMINI_RETRY_MAX_SECONDS,
+                    GEMINI_RETRY_BASE_SECONDS * (2 ** (attempt - 1)),
+                ) + random.uniform(0, 1.5)
+                print(
+                    f"[paraphrase] transient response error; "
+                    f"retry {attempt}/{GEMINI_MAX_RETRIES} in {delay:.1f}s"
+                )
+                time.sleep(delay)
+                continue
+        except requests.RequestException as e:
+            # Do not include the request URL because credentials may be attached by callers.
+            last_error = f"Gemini HTTP {getattr(e.response, 'status_code', 'error')}"
+            break
+
+    raise ParaphraseError(f"Gemini request failed after {attempts} attempts: {last_error}")
 
 PACKAGE_ROOT = os.path.dirname(os.path.abspath(__file__))
 IMAGE_DIR = os.path.join(PACKAGE_ROOT, "image")
@@ -140,6 +258,28 @@ def _ensure_schema(conn) -> None:
         )
         """
     )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS news_views (
+            id BIGSERIAL PRIMARY KEY,
+            news_id INTEGER NOT NULL REFERENCES news(id) ON DELETE CASCADE,
+            viewed_at TIMESTAMP NOT NULL DEFAULT
+                (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Colombo')
+        )
+        """
+    )
+    cur.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_news_views_weekly
+        ON news_views (viewed_at DESC, news_id)
+        """
+    )
+    cur.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_news_views_article_week
+        ON news_views (news_id, viewed_at DESC)
+        """
+    )
     for stmt in (
         "ALTER TABLE news ADD COLUMN IF NOT EXISTS source TEXT DEFAULT ''",
         "ALTER TABLE news ADD COLUMN IF NOT EXISTS category_ta TEXT DEFAULT ''",
@@ -187,7 +327,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Tamil News API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -196,7 +336,7 @@ app.add_middleware(
 os.makedirs(IMAGE_DIR, exist_ok=True)
 app.mount("/images", StaticFiles(directory=IMAGE_DIR), name="images")
 
-security = HTTPBasic()
+security = HTTPBasic(auto_error=False)
 
 
 @app.get("/")
@@ -214,15 +354,108 @@ def api_health():
     return {"ok": True}
 
 
-def require_admin(credentials: HTTPBasicCredentials = Depends(security)) -> None:
+class LoginRequest(BaseModel):
+    username: str = Field(..., min_length=1)
+    password: str = Field(..., min_length=1)
+
+
+def _admin_credentials_valid(credentials: HTTPBasicCredentials) -> bool:
     user_ok = secrets.compare_digest(credentials.username, ADMIN_USER)
     pass_ok = secrets.compare_digest(credentials.password, ADMIN_PASS)
-    if not (user_ok and pass_ok):
+    return user_ok and pass_ok
+
+
+def _effective_jwt_secret() -> str:
+    if JWT_SECRET:
+        return JWT_SECRET
+    if APP_ENV == "production":
+        raise RuntimeError("JWT_SECRET is required when APP_ENV=production")
+    return f"dev-only-{ADMIN_USER}-{ADMIN_PASS}"
+
+
+def create_admin_token() -> str:
+    now = int(time.time())
+    payload = {
+        "sub": ADMIN_USER,
+        "iat": now,
+        "exp": now + JWT_EXPIRE_MINUTES * 60,
+        "role": "admin",
+    }
+    return jwt.encode(payload, _effective_jwt_secret(), algorithm=JWT_ALGORITHM)
+
+
+def decode_admin_token(token: str) -> dict[str, Any]:
+    payload = jwt.decode(
+        token,
+        _effective_jwt_secret(),
+        algorithms=[JWT_ALGORITHM],
+    )
+    if payload.get("sub") != ADMIN_USER or payload.get("role") != "admin":
+        raise jwt.InvalidTokenError("Invalid admin token")
+    return payload
+
+
+def _basic_credentials_from_header(request: Request) -> HTTPBasicCredentials | None:
+    authorization = request.headers.get("Authorization", "")
+    if not authorization.lower().startswith("basic "):
+        return None
+    token = authorization.split(" ", 1)[1].strip()
+    try:
+        decoded = base64.b64decode(token).decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError):
+        return None
+    username, separator, password = decoded.partition(":")
+    if not separator:
+        return None
+    return HTTPBasicCredentials(username=username, password=password)
+
+
+def require_admin(request: Request) -> None:
+    token = request.cookies.get(COOKIE_NAME)
+    if token:
+        try:
+            decode_admin_token(token)
+            return
+        except jwt.PyJWTError:
+            raise HTTPException(status_code=401, detail="Invalid or expired session")
+
+    # Temporary migration fallback: existing Basic-auth clients can still call
+    # admin APIs until every deployed frontend has moved to cookie auth.
+    credentials = _basic_credentials_from_header(request)
+    if credentials and _admin_credentials_valid(credentials):
+        return
+
+    raise HTTPException(status_code=401, detail="Not authenticated")
+
+
+@app.post("/api/admin/login")
+def admin_login(payload: LoginRequest, response: Response):
+    credentials = HTTPBasicCredentials(
+        username=payload.username,
+        password=payload.password,
+    )
+    if not _admin_credentials_valid(credentials):
         raise HTTPException(
             status_code=401,
             detail="Invalid admin credentials",
-            headers={"WWW-Authenticate": "Basic"},
         )
+    token = create_admin_token()
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=COOKIE_SECURE,
+        samesite="strict",
+        max_age=JWT_EXPIRE_MINUTES * 60,
+        path="/",
+    )
+    return {"ok": True}
+
+
+@app.post("/api/admin/logout")
+def admin_logout(response: Response):
+    response.delete_cookie(COOKIE_NAME, path="/")
+    return {"ok": True}
 
 
 def normalize_image_path(image_path: str) -> str:
@@ -334,10 +567,6 @@ Original title:
 Original full_text:
 {full_text}
 """.strip()
-    url = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-    )
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
@@ -348,28 +577,23 @@ Original full_text:
         },
     }
     try:
-        resp = requests.post(url, json=payload, timeout=45)
-        resp.raise_for_status()
-        data = resp.json()
-        text = (
-            data.get("candidates", [{}])[0]
-            .get("content", {})
-            .get("parts", [{}])[0]
-            .get("text", "")
-        )
-        if text.strip().startswith("```"):
-            text = text.strip().strip("`")
-            if text.lower().startswith("json"):
-                text = text[4:].strip()
-        parsed = json.loads(text)
+        parsed = _gemini_generate_json(payload, timeout=45)
         new_title = str(parsed.get("title") or title).strip()
         new_full_text = str(parsed.get("full_text") or full_text).strip()
-        if _titles_too_similar(title, new_title):
+        if title and not new_title:
+            raise ParaphraseError("Gemini omitted the paraphrased title")
+        if full_text and not new_full_text:
+            raise ParaphraseError("Gemini omitted the paraphrased full text")
+        if full_text and " ".join(new_full_text.split()) == " ".join(full_text.split()):
+            raise ParaphraseError("Gemini returned the original full text unchanged")
+        if title and _titles_too_similar(title, new_title):
             new_title = _paraphrase_tamil_title(title, full_text)
+        if title and _titles_too_similar(title, new_title):
+            raise ParaphraseError("Gemini returned a title that was too similar")
         print("[paraphrase] completed")
-        return new_title or title, new_full_text or full_text, True
+        return new_title, new_full_text, True
     except Exception as e:
-        print(f"[paraphrase] skipped: {e}")
+        print(f"[paraphrase] deferred: {e}")
         return title, full_text, False
 
 
@@ -411,10 +635,6 @@ Original title:
 Article context:
 {context}
 """.strip()
-    url = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-    )
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
@@ -425,20 +645,7 @@ Article context:
         },
     }
     try:
-        resp = requests.post(url, json=payload, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
-        text = (
-            data.get("candidates", [{}])[0]
-            .get("content", {})
-            .get("parts", [{}])[0]
-            .get("text", "")
-        )
-        if text.strip().startswith("```"):
-            text = text.strip().strip("`")
-            if text.lower().startswith("json"):
-                text = text[4:].strip()
-        parsed = json.loads(text)
+        parsed = _gemini_generate_json(payload, timeout=30)
         new_title = str(parsed.get("title") or "").strip()
         if new_title and not _titles_too_similar(title, new_title):
             print("[paraphrase:title] completed")
@@ -446,7 +653,7 @@ Article context:
         print("[paraphrase:title] kept original: title rewrite too similar")
         return new_title or title
     except Exception as e:
-        print(f"[paraphrase:title] skipped: {e}")
+        print(f"[paraphrase:title] deferred: {e}")
         return title
 
 
@@ -468,6 +675,7 @@ class AdminNewsUpdate(BaseModel):
     url: Optional[str] = None
     image_path: Optional[str] = None
     image: Optional[str] = None
+    image_data: Optional[str] = None
     full_text: Optional[str] = None
     source: Optional[str] = None
     category_ta: Optional[str] = None
@@ -482,6 +690,43 @@ def _normalize_status(raw: Optional[str]) -> Optional[str]:
     if val in ("pending", "approved", "rejected"):
         return val
     raise HTTPException(status_code=400, detail="Invalid status value")
+
+
+def _save_admin_image_data(image_data: str) -> str:
+    """Decode a browser data URL and return its persistent /images path."""
+    if not image_data.startswith("data:") or "," not in image_data:
+        raise HTTPException(status_code=400, detail="Invalid uploaded image data.")
+    metadata, encoded = image_data.split(",", 1)
+    mime_type = metadata[5:].split(";", 1)[0].lower()
+    allowed_types = {
+        "image/jpeg": ".jpg",
+        "image/png": ".png",
+        "image/webp": ".webp",
+        "image/gif": ".gif",
+        "image/avif": ".avif",
+    }
+    extension = allowed_types.get(mime_type)
+    if not extension or ";base64" not in metadata.lower():
+        raise HTTPException(
+            status_code=415,
+            detail="Choose a JPG, PNG, WebP, GIF, or AVIF image.",
+        )
+    try:
+        data = base64.b64decode(encoded, validate=True)
+    except (ValueError, binascii.Error):
+        raise HTTPException(status_code=400, detail="Uploaded image data is corrupted.")
+    if not data:
+        raise HTTPException(status_code=400, detail="The selected image is empty.")
+    if len(data) > 8 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Image must be 8 MB or smaller.")
+
+    filename = f"admin_{uuid.uuid4().hex}{extension}"
+    try:
+        with open(os.path.join(IMAGE_DIR, filename), "wb") as image_file:
+            image_file.write(data)
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Could not save image: {e}")
+    return f"/images/{filename}"
 
 
 @app.get("/api/classifier/diagnose")
@@ -516,6 +761,12 @@ def api_news_list(
     sort: Optional[str] = None,
     limit: Optional[int] = None,
 ):
+    if (
+        (sort or "").lower() in {"trending", "popular", "views"}
+        and not source
+        and not category_ta
+    ):
+        return _popular_news(limit or 100)
     try:
         conn = db_conn()
     except Exception as e:
@@ -536,14 +787,23 @@ def api_news_list(
         where_sql = (" WHERE " + " AND ".join(where_parts)) if where_parts else ""
         order_sql = "ORDER BY created_at DESC, id DESC"
         if (sort or "").lower() in {"trending", "popular", "views"}:
-            order_sql = "ORDER BY view_count DESC, created_at DESC, id DESC"
+            order_sql = "ORDER BY period_view_count DESC, created_at DESC, id DESC"
         limit_sql = ""
         if limit is not None:
             limit_sql = "LIMIT %s"
             params.append(max(1, min(limit, 100)))
         cur.execute(
             f"""
-            SELECT id, title, image_path, source, category_ta, created_at, view_count, full_text
+            SELECT id, title, image_path, source, category_ta, created_at,
+                   (
+                       SELECT COUNT(*)::INTEGER
+                       FROM news_views v
+                       WHERE v.news_id = news.id
+                         AND v.viewed_at >=
+                             (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Colombo')
+                             - INTERVAL '30 days'
+                   ) AS period_view_count,
+                   full_text, COALESCE(view_count, 0) AS total_view_count
             FROM news
             {where_sql}
             {order_sql}
@@ -579,6 +839,8 @@ def api_news_list(
                 "category_ta": r[4] or "",
                 "created_at": json_datetime(r[5]) or "",
                 "view_count": r[6] or 0,
+                "last_30_days_view_count": r[6] or 0,
+                "total_view_count": r[8] or 0,
                 "excerpt": ((r[7] or "").strip()[:140] + ("..." if len((r[7] or "").strip()) > 140 else "")),
             }
             for r in rows
@@ -598,10 +860,19 @@ def _popular_news(limit: int = 4) -> list[dict[str, Any]]:
         cur = conn.cursor()
         cur.execute(
             """
-            SELECT id, title, image_path, source, category_ta, created_at, view_count
-            FROM news
-            WHERE status = 'approved'
-            ORDER BY view_count DESC, created_at DESC, id DESC
+            SELECT n.id, n.title, n.image_path, n.source, n.category_ta,
+                   n.created_at, COUNT(v.id)::INTEGER AS period_view_count,
+                   COALESCE(n.view_count, 0) AS total_view_count
+            FROM news n
+            JOIN news_views v
+              ON v.news_id = n.id
+             AND v.viewed_at >=
+                 (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Colombo')
+                 - INTERVAL '30 days'
+            WHERE n.status = 'approved'
+            GROUP BY n.id, n.title, n.image_path, n.source, n.category_ta,
+                     n.created_at, n.view_count
+            ORDER BY period_view_count DESC, n.created_at DESC, n.id DESC
             LIMIT %s
             """,
             (limit,),
@@ -617,6 +888,8 @@ def _popular_news(limit: int = 4) -> list[dict[str, Any]]:
                 "category_ta": r[4] or "",
                 "created_at": json_datetime(r[5]) or "",
                 "view_count": r[6] or 0,
+                "last_30_days_view_count": r[6] or 0,
+                "total_view_count": r[7] or 0,
             }
             for r in rows
         ]
@@ -677,6 +950,22 @@ def _increment_article_view(article_id: int, event_source: str) -> dict[str, Any
                 flush=True,
             )
             raise HTTPException(status_code=404, detail="Article not found")
+        cur.execute(
+            "INSERT INTO news_views (news_id) VALUES (%s)",
+            (article_id,),
+        )
+        cur.execute(
+            """
+            SELECT COUNT(*)::INTEGER
+            FROM news_views
+            WHERE news_id = %s
+              AND viewed_at >=
+                  (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Colombo')
+                  - INTERVAL '30 days'
+            """,
+            (article_id,),
+        )
+        last_30_days_view_count = cur.fetchone()[0]
         conn.commit()
         cur.close()
         print(
@@ -684,7 +973,12 @@ def _increment_article_view(article_id: int, event_source: str) -> dict[str, Any
             % (row[0], row[3] or 0, row[2] or "", (row[1] or "")[:80]),
             flush=True,
         )
-        return {"id": row[0], "status": row[2] or "", "view_count": row[3] or 0}
+        return {
+            "id": row[0],
+            "status": row[2] or "",
+            "view_count": row[3] or 0,
+            "last_30_days_view_count": last_30_days_view_count or 0,
+        }
     finally:
         conn.close()
 
@@ -777,8 +1071,10 @@ def api_sync():
                 ):
                     title = existing[0] or original_title
                     full_text = existing[1] or original_full_text
-                    if _titles_too_similar(original_title, title):
+                    if original_title and _titles_too_similar(original_title, title):
                         title = _paraphrase_tamil_title(original_title, full_text)
+                    if original_title and _titles_too_similar(original_title, title):
+                        raise ParaphraseError("Existing article title still needs paraphrasing")
                     paraphrase_reused += 1
                 else:
                     title, full_text, did_paraphrase = _paraphrase_tamil_news(
@@ -789,6 +1085,9 @@ def api_sync():
                         paraphrased += 1
                     else:
                         paraphrase_skipped += 1
+                        raise ParaphraseError(
+                            "Article was not saved because paraphrasing is incomplete"
+                        )
                 src = item.get("source") or "unknown"
                 category_ta = classify_article_for_pipeline(original_full_text, original_title)
                 cur.execute(
@@ -829,9 +1128,10 @@ def api_sync():
                 else:
                     updated += 1
                 conn.commit()
-            except Exception:
+            except Exception as e:
                 conn.rollback()
                 failed += 1
+                print(f"[sync] deferred url={item.get('url') or '<missing>'}: {e}")
         cur.close()
     finally:
         conn.close()
@@ -1017,8 +1317,48 @@ def api_admin_normalize_images():
     return {"updated": updated}
 
 
+@app.post("/api/admin/images", dependencies=[Depends(require_admin)])
+async def api_admin_image_upload(request: Request):
+    """Upload an admin-selected image without requiring multipart form parsing."""
+    content_type = (request.headers.get("content-type") or "").split(";", 1)[0].lower()
+    allowed_types = {
+        "image/jpeg": ".jpg",
+        "image/png": ".png",
+        "image/webp": ".webp",
+        "image/gif": ".gif",
+        "image/avif": ".avif",
+    }
+    extension = allowed_types.get(content_type)
+    if not extension:
+        raise HTTPException(
+            status_code=415,
+            detail="Choose a JPG, PNG, WebP, GIF, or AVIF image.",
+        )
+
+    data = await request.body()
+    max_bytes = 8 * 1024 * 1024
+    if not data:
+        raise HTTPException(status_code=400, detail="The selected image is empty.")
+    if len(data) > max_bytes:
+        raise HTTPException(status_code=413, detail="Image must be 8 MB or smaller.")
+
+    filename = f"admin_{uuid.uuid4().hex}{extension}"
+    destination = os.path.join(IMAGE_DIR, filename)
+    try:
+        with open(destination, "wb") as image_file:
+            image_file.write(data)
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Could not save image: {e}")
+
+    image_path = f"/images/{filename}"
+    return {"image": image_path, "image_path": image_path}
+
+
 @app.get("/api/admin/news", dependencies=[Depends(require_admin)])
-def api_admin_news_list(status: Optional[str] = None):
+def api_admin_news_list(
+    status: Optional[str] = None,
+    source: Optional[str] = None,
+):
     status_norm = _normalize_status(status)
     try:
         conn = db_conn()
@@ -1031,6 +1371,10 @@ def api_admin_news_list(status: Optional[str] = None):
         if status_norm:
             where_parts.append("status = %s")
             params.append(status_norm)
+        source_norm = (source or "").strip()
+        if source_norm:
+            where_parts.append("LOWER(source) = LOWER(%s)")
+            params.append(source_norm)
         where_sql = (" WHERE " + " AND ".join(where_parts)) if where_parts else ""
         cur.execute(
             f"""
@@ -1117,9 +1461,12 @@ def api_admin_news_update(article_id: int, body: AdminNewsUpdate):
         add("title", body.title)
     if body.url is not None:
         add("url", body.url)
-    image_path = body.image_path if body.image_path is not None else body.image
-    if image_path is not None:
-        add("image_path", normalize_image_path(image_path))
+    if body.image_data is not None:
+        add("image_path", _save_admin_image_data(body.image_data))
+    else:
+        image_path = body.image_path if body.image_path is not None else body.image
+        if image_path is not None:
+            add("image_path", normalize_image_path(image_path))
     if body.full_text is not None:
         add("full_text", body.full_text)
     if body.source is not None:
@@ -1142,15 +1489,22 @@ def api_admin_news_update(article_id: int, body: AdminNewsUpdate):
         cur = conn.cursor()
         params.append(article_id)
         cur.execute(
-            f"UPDATE news SET {', '.join(updates)} WHERE id = %s",
+            f"UPDATE news SET {', '.join(updates)} WHERE id = %s RETURNING image_path",
             params,
         )
-        if cur.rowcount == 0:
+        updated_row = cur.fetchone()
+        if updated_row is None:
             conn.rollback()
             raise HTTPException(status_code=404, detail="Article not found")
         conn.commit()
         cur.close()
-        return {"ok": True}
+        saved_image_path = normalize_image_path(updated_row[0] or "")
+        return {
+            "ok": True,
+            "id": article_id,
+            "image": to_image_url(saved_image_path),
+            "image_path": saved_image_path,
+        }
     finally:
         conn.close()
 

@@ -26,6 +26,7 @@ parsel==1.11.0
 playwright==1.58.0
 Protego==0.6.0
 psycopg2-binary==2.9.11
+PyJWT==2.10.1
 pyasn1==0.6.2
 pyasn1_modules==0.4.2
 pycparser==3.0
