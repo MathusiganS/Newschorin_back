@@ -78,6 +78,7 @@ def require_admin(
 
 
 def require_operator(
+    request: Request,
     credentials: HTTPBasicCredentials | None = Depends(optional_basic_security),
     sync_api_key: str | None = Depends(optional_sync_key),
     settings: Settings = Depends(get_settings),
@@ -87,9 +88,22 @@ def require_operator(
         and sync_api_key
         and secrets.compare_digest(sync_api_key, settings.sync_api_key)
     )
-    admin_ok = bool(
-        credentials and _admin_credentials_valid(credentials, settings)
-    )
+
+    admin_ok = False
+    token = request.cookies.get(settings.cookie_name)
+    if token:
+        try:
+            decode_admin_token(token, settings)
+            admin_ok = True
+        except jwt.PyJWTError:
+            admin_ok = False
+
+    # Temporary migration fallback for any existing manual sync calls.
+    if not admin_ok:
+        admin_ok = bool(
+            credentials and _admin_credentials_valid(credentials, settings)
+        )
+
     if not (key_ok or admin_ok):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
