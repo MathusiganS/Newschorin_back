@@ -43,6 +43,11 @@ class Settings:
     admin_password: str
     admin_password_hash: str
     sync_api_key: str
+    jwt_secret: str
+    jwt_algorithm: str
+    jwt_expire_minutes: int
+    cookie_name: str
+    cookie_secure: bool
     cors_origins: tuple[str, ...]
     gemini_api_key: str
     gemini_model: str
@@ -82,6 +87,10 @@ class Settings:
             raise RuntimeError(
                 "Production requires non-default admin credentials."
             )
+        if not self.jwt_secret:
+            raise RuntimeError(
+                "Production requires JWT_SECRET for admin cookie sessions."
+            )
         if "postgres:12345@" in self.database_url:
             raise RuntimeError(
                 "Production requires DATABASE_URL without the development password."
@@ -94,6 +103,8 @@ def get_settings() -> Settings:
     os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", "0")
 
     package_root = Path(__file__).resolve().parents[2]
+    app_env = os.environ.get("APP_ENV", "development")
+    cookie_secure_default = app_env.lower() in {"production", "prod"}
     gemini_model = (
         os.environ.get("GEMINI_MODEL")
         or os.environ.get("model")
@@ -115,7 +126,7 @@ def get_settings() -> Settings:
 
     return Settings(
         app_name=os.environ.get("APP_NAME", "Tamil News API"),
-        app_env=os.environ.get("APP_ENV", "development"),
+        app_env=app_env,
         database_url=os.environ.get(
             "DATABASE_URL",
             "postgresql://postgres:12345@localhost:5432/news_techorin",
@@ -124,7 +135,15 @@ def get_settings() -> Settings:
         admin_password=os.environ.get("ADMIN_PASS", "admin"),
         admin_password_hash=os.environ.get("ADMIN_PASSWORD_HASH", ""),
         sync_api_key=os.environ.get("SYNC_API_KEY", ""),
-        cors_origins=_env_list("CORS_ORIGINS", ("*",)),
+        jwt_secret=os.environ.get("JWT_SECRET", ""),
+        jwt_algorithm=os.environ.get("JWT_ALGORITHM", "HS256"),
+        jwt_expire_minutes=_env_int("JWT_EXPIRE_MINUTES", 480, minimum=1),
+        cookie_name=os.environ.get("COOKIE_NAME", "admin_session"),
+        cookie_secure=_env_bool("COOKIE_SECURE", cookie_secure_default),
+        cors_origins=_env_list(
+            "CORS_ORIGINS",
+            ("http://localhost:5173", "http://127.0.0.1:5173"),
+        ),
         gemini_api_key=os.environ.get("GEMINI_API_KEY", ""),
         gemini_model=gemini_model,
         gemini_temperature=gemini_temperature,

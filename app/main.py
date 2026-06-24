@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from tamilwin_scraper.app.api.routes import (
     admin,
+    auth,
     classification,
     news,
     operations,
@@ -64,11 +65,10 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     application = FastAPI(title=settings.app_name, lifespan=lifespan)
-    wildcard_cors = "*" in settings.cors_origins
     application.add_middleware(
         CORSMiddleware,
         allow_origins=list(settings.cors_origins),
-        allow_credentials=not wildcard_cors,
+        allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -81,6 +81,7 @@ def create_app() -> FastAPI:
     )
 
     application.include_router(system.router)
+    application.include_router(auth.router)
     application.include_router(classification.router)
     application.include_router(news.router)
     application.include_router(operations.router)
