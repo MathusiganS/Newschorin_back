@@ -5,11 +5,11 @@ from pathlib import Path
 
 from psycopg2.extensions import connection
 
-from tamilwin_scraper.app.core.config import get_settings
-from tamilwin_scraper.app.db.connection import connection_scope
-from tamilwin_scraper.app.db.schema import ensure_schema
-from tamilwin_scraper.app.repositories.news_repository import NewsRepository
-from tamilwin_scraper.app.utils.images import normalize_image_path
+from app.core.config import get_settings
+from app.db.connection import connection_scope
+from app.db.schema import ensure_schema
+from app.repositories.news_repository import NewsRepository
+from app.utils.images import normalize_image_path
 
 
 logger = logging.getLogger(__name__)

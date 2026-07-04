@@ -6,18 +6,18 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from tamilwin_scraper.app.core.config import get_settings
-from tamilwin_scraper.app.db.connection import connection_scope
-from tamilwin_scraper.app.db.schema import ensure_schema
-from tamilwin_scraper.app.integrations.gemini_client import (
+from app.core.config import get_settings
+from app.db.connection import connection_scope
+from app.db.schema import ensure_schema
+from app.integrations.gemini_client import (
     GeminiClient,
     body_rewrite_acceptable,
     titles_too_similar,
 )
-from tamilwin_scraper.app.repositories.news_repository import NewsRepository
-from tamilwin_scraper.app.services.classification_service import classify_article
-from tamilwin_scraper.app.utils.datetime import parse_scraped_datetime
-from tamilwin_scraper.app.utils.images import normalize_image_path
+from app.repositories.news_repository import NewsRepository
+from app.services.classification_service import classify_article
+from app.utils.datetime import parse_scraped_datetime
+from app.utils.images import normalize_image_path
 
 
 logger = logging.getLogger(__name__)
@@ -48,6 +48,8 @@ def sync_news_json() -> dict[str, int]:
         ensure_schema(conn)
         repository = NewsRepository(conn)
         for item in items:
+            original_title = ""
+            url = ""
             try:
                 if not isinstance(item, dict):
                     raise ValueError("News item must be an object")
@@ -119,10 +121,28 @@ def sync_news_json() -> dict[str, int]:
                     inserted += 1
                 else:
                     updated += 1
-            except Exception:
+            except Exception as exc:
                 conn.rollback()
                 failed += 1
-                logger.exception("Failed to synchronize a scraped news item")
+                error_message = f"{type(exc).__name__}: {exc}"
+                try:
+                    repository.record_sync_error(
+                        url=url,
+                        original_title=original_title,
+                        error_message=error_message,
+                    )
+                except Exception:
+                    conn.rollback()
+                    logger.exception(
+                        "Failed to persist sync error url=%s title=%s",
+                        url,
+                        original_title,
+                    )
+                logger.exception(
+                    "Failed to synchronize a scraped news item url=%s title=%s",
+                    url,
+                    original_title,
+                )
 
     result = {
         "total": len(items),

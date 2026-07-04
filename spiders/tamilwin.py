@@ -1,4 +1,4 @@
-from tamilwin_scraper.spiders.base_news import BaseNewsSpider
+from spiders.base_news import BaseNewsSpider
 
 
 class TamilwinSpider(BaseNewsSpider):

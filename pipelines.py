@@ -1,7 +1,7 @@
 import json
 import os
 
-from tamilwin_scraper.classifier import (
+from classifier import (
     classify_article_for_pipeline,
     diagnose_classifier,
 )
@@ -29,7 +29,7 @@ class SaveNewsPipeline:
             spider.logger.warning(
                 "Tamil categories: NO classifier pickle found. %s | "
                 "Copy tamil_news_classifier.pkl (+ label_encoder.pkl) into "
-                "tamilwin_scraper/models/ or set TAMILNEWS_MODEL_DIR. "
+                "models/ or set TAMILNEWS_MODEL_DIR. "
                 "Optional: TAMILNEWS_KEYWORD_FALLBACK=1 for rule-based labels. "
                 "Searched: %s",
                 info.get("load_error") or "",

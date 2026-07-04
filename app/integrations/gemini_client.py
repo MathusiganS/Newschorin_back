@@ -9,7 +9,7 @@ from difflib import SequenceMatcher
 
 import requests
 
-from tamilwin_scraper.app.core.config import Settings, get_settings
+from app.core.config import Settings, get_settings
 
 
 logger = logging.getLogger(__name__)

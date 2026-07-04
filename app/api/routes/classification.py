@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from tamilwin_scraper.app.core.security import require_admin
-from tamilwin_scraper.app.schemas.classification import (
+from app.core.security import require_admin
+from app.schemas.classification import (
     ClassifyRequest,
     ClassifyResponse,
 )
-from tamilwin_scraper.app.services.classification_service import (
+from app.services.classification_service import (
     classifier_diagnostics,
     classify_article,
 )

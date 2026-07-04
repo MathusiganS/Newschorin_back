@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 from fastapi.routing import APIRoute
 
-from tamilwin_scraper.fastapi_app import app
+from fastapi_app import app
 
 
 EXPECTED_ROUTES = {

@@ -9,8 +9,8 @@ Expected layout (same as your training script):
 
 Pickle resolution order (first file found wins):
   1. TAMILNEWS_MODEL_DIR env
-  2. tamilwin_scraper/models/tamil_news_classifier.pkl
-  3. tamilwin_scraper/tamil_news_classifier.pkl
+  2. models/tamil_news_classifier.pkl
+  3. tamil_news_classifier.pkl
 
 Classifier pickle is required for ML labels; `label_encoder.pkl` is optional if
 `predict` already returns Tamil strings. Use `TAMILNEWS_KEYWORD_FALLBACK=1` for
@@ -322,8 +322,7 @@ class TamilNewsClassifier:
             self._load_error = (
                 "Missing classifier pickle. Tried: "
                 + ", ".join(CLF_FILENAMES)
-                + " under TAMILNEWS_MODEL_DIR, tamilwin_scraper/models/, "
-                "tamilwin_scraper/, or repo ../models/ and ../"
+                + " under TAMILNEWS_MODEL_DIR, models/, or the repo root"
             )
             return
 
@@ -455,7 +454,7 @@ def classify_article_for_pipeline(full_text: str, title: Optional[str] = None) -
         cat = clf.predict_category(cleaned)
     if cat:
         return cat
-    from tamilwin_scraper.category_keywords import keyword_category
+    from category_keywords import keyword_category
 
     return canonical_tamil_category(keyword_category(cleaned) or "")
 

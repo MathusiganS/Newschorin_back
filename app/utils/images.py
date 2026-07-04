@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tamilwin_scraper.app.core.config import get_settings
+from app.core.config import get_settings
 
 
 def normalize_image_path(image_path: str) -> str:

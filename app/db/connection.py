@@ -6,8 +6,8 @@ from typing import Iterator
 import psycopg2
 from psycopg2.extensions import connection
 
-from tamilwin_scraper.app.core.config import get_settings
-from tamilwin_scraper.app.core.exceptions import DatabaseUnavailableError
+from app.core.config import get_settings
+from app.core.exceptions import DatabaseUnavailableError
 
 
 def connect() -> connection:

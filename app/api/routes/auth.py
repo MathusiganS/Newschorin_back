@@ -3,10 +3,10 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.security import HTTPBasicCredentials
 
-from tamilwin_scraper.app.core.config import Settings, get_settings
-from tamilwin_scraper.app.core.security import _admin_credentials_valid
-from tamilwin_scraper.app.core.tokens import create_admin_token
-from tamilwin_scraper.app.schemas.auth import LoginRequest
+from app.core.config import Settings, get_settings
+from app.core.security import _admin_credentials_valid
+from app.core.tokens import create_admin_token
+from app.schemas.auth import LoginRequest
 
 
 router = APIRouter(prefix="/api/admin", tags=["auth"])

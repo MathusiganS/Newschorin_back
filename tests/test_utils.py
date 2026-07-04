@@ -2,17 +2,17 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from tamilwin_scraper.app.integrations.gemini_client import (
+from app.integrations.gemini_client import (
     body_rewrite_acceptable,
     split_text_chunks,
     titles_too_similar,
 )
-from tamilwin_scraper.app.core.passwords import hash_password, verify_password
-from tamilwin_scraper.app.utils.datetime import (
+from app.core.passwords import hash_password, verify_password
+from app.utils.datetime import (
     json_datetime,
     parse_scraped_datetime,
 )
-from tamilwin_scraper.app.utils.images import normalize_image_path
+from app.utils.images import normalize_image_path
 
 
 def test_image_path_contract() -> None:

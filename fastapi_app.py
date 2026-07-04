@@ -5,10 +5,9 @@ from pathlib import Path
 
 
 PACKAGE_DIR = Path(__file__).resolve().parent
-REPOSITORY_ROOT = PACKAGE_DIR.parent
-if str(REPOSITORY_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPOSITORY_ROOT))
+if str(PACKAGE_DIR) not in sys.path:
+    sys.path.insert(0, str(PACKAGE_DIR))
 
-from tamilwin_scraper.app.main import app, create_app
+from app.main import app, create_app
 
 __all__ = ["app", "create_app"]

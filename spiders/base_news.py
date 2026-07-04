@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 
 import scrapy
 
-from tamilwin_scraper.spiders.date_utils import extract_published_at
+from spiders.date_utils import extract_published_at
 
 
 IMAGE_DIR = os.path.join(

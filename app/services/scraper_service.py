@@ -10,10 +10,10 @@ from typing import Iterator
 
 from psycopg2.extensions import connection
 
-from tamilwin_scraper.app.core.config import get_settings
-from tamilwin_scraper.app.db.connection import connect
-from tamilwin_scraper.app.services.image_service import log_image_directory
-from tamilwin_scraper.app.services.sync_service import sync_news_json
+from app.core.config import get_settings
+from app.db.connection import connect
+from app.services.image_service import log_image_directory
+from app.services.sync_service import sync_news_json
 
 
 logger = logging.getLogger(__name__)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from tamilwin_scraper.classifier import (
+from classifier import (
     classify_article_for_pipeline,
     diagnose_classifier,
 )

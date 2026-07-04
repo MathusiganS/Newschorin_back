@@ -5,7 +5,7 @@ from typing import Any
 
 import jwt
 
-from tamilwin_scraper.app.core.config import Settings
+from app.core.config import Settings
 
 
 def _jwt_secret(settings: Settings) -> str:
