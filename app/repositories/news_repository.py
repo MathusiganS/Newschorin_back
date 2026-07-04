@@ -4,8 +4,8 @@ from typing import Any, Iterable, Optional
 
 from psycopg2.extensions import connection
 
-from tamilwin_scraper.app.utils.datetime import json_datetime
-from tamilwin_scraper.app.utils.images import to_image_url
+from app.utils.datetime import json_datetime
+from app.utils.images import to_image_url
 
 
 class NewsRepository:
@@ -16,27 +16,18 @@ class NewsRepository:
         self,
         source: Optional[str] = None,
         category_ta: Optional[str] = None,
+        search: Optional[str] = None,
         sort: Optional[str] = None,
         limit: Optional[int] = None,
+        offset: Optional[int] = None,
     ) -> list[dict[str, Any]]:
-        where_parts: list[str] = []
-        params: list[Any] = []
-        if source:
-            where_parts.append("source = %s")
-            params.append(source)
-        if category_ta:
-            where_parts.append("category_ta = %s")
-            params.append(category_ta)
-        where_parts.append("status = %s")
-        params.append("approved")
-        where_sql = " WHERE " + " AND ".join(where_parts)
+        where_sql, params = self._public_filters(source, category_ta, search)
         order_sql = "ORDER BY created_at DESC, id DESC"
         if (sort or "").lower() in {"trending", "popular", "views"}:
             order_sql = "ORDER BY view_count DESC, created_at DESC, id DESC"
-        limit_sql = ""
-        if limit is not None:
-            limit_sql = "LIMIT %s"
-            params.append(max(1, min(limit, 100)))
+        bounded_limit = max(1, min(limit or 20, 100))
+        bounded_offset = max(0, offset or 0)
+        params.extend([bounded_limit, bounded_offset])
 
         with self.conn.cursor() as cursor:
             cursor.execute(
@@ -46,12 +37,31 @@ class NewsRepository:
                 FROM news
                 {where_sql}
                 {order_sql}
-                {limit_sql}
+                LIMIT %s OFFSET %s
                 """,
                 params,
             )
             rows = cursor.fetchall()
         return [self._public_list_row(row) for row in rows]
+
+    def count_public(
+        self,
+        source: Optional[str] = None,
+        category_ta: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> int:
+        where_sql, params = self._public_filters(source, category_ta, search)
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT COUNT(*)
+                FROM news
+                {where_sql}
+                """,
+                params,
+            )
+            row = cursor.fetchone()
+        return int(row[0] if row else 0)
 
     def list_popular(self, limit: int = 4) -> list[dict[str, Any]]:
         bounded_limit = max(1, min(limit, 20))
@@ -259,12 +269,26 @@ class NewsRepository:
                 (image_path, article_id),
             )
 
-    def list_admin(self, status: Optional[str] = None) -> list[dict[str, Any]]:
-        where_sql = ""
-        params: list[Any] = []
-        if status:
-            where_sql = " WHERE status = %s"
-            params.append(status)
+    def list_admin(
+        self,
+        status: Optional[str] = None,
+        source: Optional[str] = None,
+        category_ta: Optional[str] = None,
+        search: Optional[str] = None,
+        sort: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+    ) -> list[dict[str, Any]]:
+        where_sql, params = self._admin_filters(
+            status=status,
+            source=source,
+            category_ta=category_ta,
+            search=search,
+        )
+        order_sql = self._admin_order(sort)
+        bounded_limit = max(1, min(limit or 20, 100))
+        bounded_offset = max(0, offset or 0)
+        params.extend([bounded_limit, bounded_offset])
         with self.conn.cursor() as cursor:
             cursor.execute(
                 f"""
@@ -273,12 +297,38 @@ class NewsRepository:
                        original_full_text
                 FROM news
                 {where_sql}
-                ORDER BY created_at DESC, id DESC
+                {order_sql}
+                LIMIT %s OFFSET %s
                 """,
                 params,
             )
             rows = cursor.fetchall()
         return [self._admin_row(row) for row in rows]
+
+    def count_admin(
+        self,
+        status: Optional[str] = None,
+        source: Optional[str] = None,
+        category_ta: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> int:
+        where_sql, params = self._admin_filters(
+            status=status,
+            source=source,
+            category_ta=category_ta,
+            search=search,
+        )
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT COUNT(*)
+                FROM news
+                {where_sql}
+                """,
+                params,
+            )
+            row = cursor.fetchone()
+        return int(row[0] if row else 0)
 
     def get_admin_detail(self, article_id: int) -> Optional[dict[str, Any]]:
         with self.conn.cursor() as cursor:
@@ -315,6 +365,125 @@ class NewsRepository:
         else:
             self.conn.rollback()
         return found
+
+    def record_sync_error(
+        self,
+        *,
+        url: str,
+        original_title: str,
+        error_message: str,
+    ) -> None:
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO sync_errors (url, original_title, error_message)
+                VALUES (%s, %s, %s)
+                """,
+                (
+                    url or None,
+                    original_title or None,
+                    error_message[:2000],
+                ),
+            )
+        self.conn.commit()
+
+    def list_sync_errors(self, resolved: bool = False) -> list[dict[str, Any]]:
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT id, url, original_title, error_message, occurred_at
+                FROM sync_errors
+                WHERE resolved = %s
+                ORDER BY occurred_at DESC
+                """,
+                (resolved,),
+            )
+            rows = cursor.fetchall()
+        return [
+            {
+                "id": row[0],
+                "url": row[1] or "",
+                "original_title": row[2] or "",
+                "error_message": row[3] or "",
+                "occurred_at": json_datetime(row[4]) or "",
+            }
+            for row in rows
+        ]
+
+    def mark_sync_error_resolved(self, error_id: int) -> None:
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                "UPDATE sync_errors SET resolved = TRUE WHERE id = %s",
+                (error_id,),
+            )
+        self.conn.commit()
+
+    @staticmethod
+    def _public_filters(
+        source: Optional[str] = None,
+        category_ta: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> tuple[str, list[Any]]:
+        where_parts: list[str] = []
+        params: list[Any] = []
+        if source:
+            where_parts.append("source = %s")
+            params.append(source)
+        if category_ta:
+            where_parts.append("category_ta = %s")
+            params.append(category_ta)
+        if search:
+            where_parts.append("(title ILIKE %s OR full_text ILIKE %s)")
+            like = f"%{search}%"
+            params.extend([like, like])
+        where_parts.append("status = %s")
+        params.append("approved")
+        return " WHERE " + " AND ".join(where_parts), params
+
+    @staticmethod
+    def _admin_filters(
+        status: Optional[str] = None,
+        source: Optional[str] = None,
+        category_ta: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> tuple[str, list[Any]]:
+        where_parts: list[str] = []
+        params: list[Any] = []
+        if status:
+            where_parts.append("status = %s")
+            params.append(status)
+        if source:
+            where_parts.append("source = %s")
+            params.append(source)
+        if category_ta:
+            where_parts.append("category_ta = %s")
+            params.append(category_ta)
+        if search:
+            where_parts.append(
+                "(title ILIKE %s OR original_title ILIKE %s OR "
+                "url ILIKE %s OR source ILIKE %s)"
+            )
+            like = f"%{search}%"
+            params.extend([like, like, like, like])
+        if not where_parts:
+            return "", params
+        return " WHERE " + " AND ".join(where_parts), params
+
+    @staticmethod
+    def _admin_order(sort: Optional[str] = None) -> str:
+        match (sort or "newest").lower():
+            case "oldest" | "created_asc":
+                return "ORDER BY created_at ASC, id ASC"
+            case "title" | "title_asc":
+                return "ORDER BY LOWER(title) ASC, created_at DESC, id DESC"
+            case "title_desc":
+                return "ORDER BY LOWER(title) DESC, created_at DESC, id DESC"
+            case "source" | "source_asc":
+                return "ORDER BY LOWER(source) ASC, created_at DESC, id DESC"
+            case "status" | "status_asc":
+                return "ORDER BY status ASC, created_at DESC, id DESC"
+            case _:
+                return "ORDER BY created_at DESC, id DESC"
 
     @staticmethod
     def _public_list_row(row: tuple[Any, ...]) -> dict[str, Any]:

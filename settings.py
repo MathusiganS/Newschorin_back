@@ -3,17 +3,16 @@ import sys
 
 os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", "0")
 
-# Scrapy settings for tamilwin_scraper project
+# Scrapy settings
 
 PACKAGE_ROOT = os.path.dirname(os.path.abspath(__file__))
-REPO_ROOT = os.path.dirname(PACKAGE_ROOT)
-if REPO_ROOT not in sys.path:
-    sys.path.insert(0, REPO_ROOT)
+if PACKAGE_ROOT not in sys.path:
+    sys.path.insert(0, PACKAGE_ROOT)
 
-BOT_NAME = "tamilwin_scraper"
+BOT_NAME = "news_scraper"
 
-SPIDER_MODULES = ["tamilwin_scraper.spiders"]
-NEWSPIDER_MODULE = "tamilwin_scraper.spiders"
+SPIDER_MODULES = ["spiders"]
+NEWSPIDER_MODULE = "spiders"
 
 
 # Identify yourself responsibly
@@ -50,7 +49,7 @@ PLAYWRIGHT_LAUNCH_OPTIONS = {"headless": True}
 
 # Enable pipelines
 ITEM_PIPELINES = {
-    "tamilwin_scraper.pipelines.SaveNewsPipeline": 300,
+    "pipelines.SaveNewsPipeline": 300,
 }
 
 

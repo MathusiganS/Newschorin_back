@@ -4,17 +4,20 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends
 
-from tamilwin_scraper.app.core.security import require_admin
-from tamilwin_scraper.app.integrations.gemini_client import GeminiClient
-from tamilwin_scraper.app.schemas.admin import AdminNewsUpdate
-from tamilwin_scraper.app.services.admin_service import (
+from app.core.security import require_admin
+from app.db.connection import connection_scope
+from app.db.schema import ensure_schema
+from app.integrations.gemini_client import GeminiClient
+from app.repositories.news_repository import NewsRepository
+from app.schemas.admin import AdminNewsUpdate
+from app.services.admin_service import (
     get_admin_news,
     list_admin_news,
     paraphrase_all_news,
     paraphrase_all_titles,
     update_admin_news,
 )
-from tamilwin_scraper.app.services.image_service import (
+from app.services.image_service import (
     normalize_database_image_paths,
 )
 
@@ -46,9 +49,40 @@ def api_admin_normalize_images():
     return {"updated": normalize_database_image_paths()}
 
 
+@router.get("/sync-errors")
+def api_admin_sync_errors():
+    with connection_scope() as conn:
+        ensure_schema(conn)
+        return NewsRepository(conn).list_sync_errors(resolved=False)
+
+
+@router.post("/sync-errors/{error_id:int}/resolve")
+def api_admin_resolve_sync_error(error_id: int):
+    with connection_scope() as conn:
+        ensure_schema(conn)
+        NewsRepository(conn).mark_sync_error_resolved(error_id)
+    return {"ok": True}
+
+
 @router.get("/news")
-def api_admin_news_list(status: Optional[str] = None):
-    return list_admin_news(status)
+def api_admin_news_list(
+    status: Optional[str] = None,
+    source: Optional[str] = None,
+    category_ta: Optional[str] = None,
+    search: Optional[str] = None,
+    sort: Optional[str] = None,
+    limit: Optional[int] = None,
+    offset: Optional[int] = None,
+):
+    return list_admin_news(
+        status=status,
+        source=source,
+        category_ta=category_ta,
+        search=search,
+        sort=sort,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/news/{article_id:int}")

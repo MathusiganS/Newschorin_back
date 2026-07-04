@@ -5,15 +5,15 @@ from typing import Any, Optional
 
 from fastapi import HTTPException
 
-from tamilwin_scraper.app.db.connection import connection_scope
-from tamilwin_scraper.app.db.schema import ensure_schema
-from tamilwin_scraper.app.integrations.gemini_client import GeminiClient
-from tamilwin_scraper.app.models.enums import NewsStatus
-from tamilwin_scraper.app.repositories.news_repository import NewsRepository
-from tamilwin_scraper.app.schemas.admin import AdminNewsUpdate
-from tamilwin_scraper.app.services.classification_service import classify_article
-from tamilwin_scraper.app.utils.datetime import parse_scraped_datetime
-from tamilwin_scraper.app.utils.images import normalize_image_path
+from app.db.connection import connection_scope
+from app.db.schema import ensure_schema
+from app.integrations.gemini_client import GeminiClient
+from app.models.enums import NewsStatus
+from app.repositories.news_repository import NewsRepository
+from app.schemas.admin import AdminNewsUpdate
+from app.services.classification_service import classify_article
+from app.utils.datetime import parse_scraped_datetime
+from app.utils.images import normalize_image_path
 
 
 logger = logging.getLogger(__name__)
@@ -28,10 +28,46 @@ def normalize_status(raw: Optional[str]) -> Optional[str]:
     raise HTTPException(status_code=400, detail="Invalid status value")
 
 
-def list_admin_news(status: Optional[str] = None) -> list[dict[str, Any]]:
+def list_admin_news(
+    status: Optional[str] = None,
+    source: Optional[str] = None,
+    category_ta: Optional[str] = None,
+    search: Optional[str] = None,
+    sort: Optional[str] = None,
+    limit: Optional[int] = None,
+    offset: Optional[int] = None,
+) -> dict[str, Any]:
     normalized = normalize_status(status)
+    normalized_source = source.strip() if source else None
+    normalized_category = category_ta.strip() if category_ta else None
+    normalized_search = search.strip() if search else None
     with connection_scope() as conn:
-        return NewsRepository(conn).list_admin(normalized)
+        repository = NewsRepository(conn)
+        items = repository.list_admin(
+            status=normalized,
+            source=normalized_source,
+            category_ta=normalized_category,
+            search=normalized_search,
+            sort=sort,
+            limit=limit,
+            offset=offset,
+        )
+        total = repository.count_admin(
+            status=normalized,
+            source=normalized_source,
+            category_ta=normalized_category,
+            search=normalized_search,
+        )
+        counts = {
+            status_value: repository.count_admin(
+                status=status_value,
+                source=normalized_source,
+                category_ta=normalized_category,
+                search=normalized_search,
+            )
+            for status_value in (status.value for status in NewsStatus)
+        }
+    return {"items": items, "total": total, "counts": counts}
 
 
 def get_admin_news(article_id: int) -> dict[str, Any]:

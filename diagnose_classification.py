@@ -1,7 +1,7 @@
 """
-Run from the repository root or from tamilwin_scraper/:
+Run from the repository root:
 
-  python -m tamilwin_scraper.diagnose_classification
+  python diagnose_classification.py
 
 Shows classifier paths, load errors, and a sample prediction from news.json.
 """
@@ -14,11 +14,11 @@ import sys
 
 
 def main() -> int:
-    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    repo = os.path.dirname(os.path.abspath(__file__))
     if repo not in sys.path:
         sys.path.insert(0, repo)
 
-    from tamilwin_scraper.classifier import (
+    from classifier import (
         classify_article_for_pipeline,
         diagnose_classifier,
     )

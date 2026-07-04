@@ -34,6 +34,24 @@ SCHEMA_STATEMENTS = (
         "ALTER TABLE news ALTER COLUMN created_at SET DEFAULT "
         "(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Colombo')"
     ),
+    """
+    CREATE TABLE IF NOT EXISTS sync_errors (
+        id SERIAL PRIMARY KEY,
+        url TEXT,
+        original_title TEXT,
+        error_message TEXT NOT NULL,
+        occurred_at TIMESTAMP DEFAULT NOW(),
+        resolved BOOLEAN DEFAULT FALSE
+    )
+    """,
+    (
+        "CREATE INDEX IF NOT EXISTS idx_sync_errors_resolved "
+        "ON sync_errors (resolved, occurred_at DESC)"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_sync_errors_url "
+        "ON sync_errors (url)"
+    ),
 )
 
 

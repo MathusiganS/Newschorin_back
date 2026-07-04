@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from tamilwin_scraper.app.api.routes import (
+from app.api.routes import (
     admin,
     auth,
     classification,
@@ -18,16 +18,16 @@ from tamilwin_scraper.app.api.routes import (
     operations,
     system,
 )
-from tamilwin_scraper.app.core.config import get_settings
-from tamilwin_scraper.app.core.exceptions import DatabaseUnavailableError
-from tamilwin_scraper.app.core.logging import configure_logging
-from tamilwin_scraper.app.db.connection import connection_scope
-from tamilwin_scraper.app.db.schema import ensure_schema
-from tamilwin_scraper.app.services.image_service import (
+from app.core.config import get_settings
+from app.core.exceptions import DatabaseUnavailableError
+from app.core.logging import configure_logging
+from app.db.connection import connection_scope
+from app.db.schema import ensure_schema
+from app.services.image_service import (
     log_image_directory,
     normalize_database_image_paths,
 )
-from tamilwin_scraper.app.services.scraper_service import scrape_scheduler
+from app.services.scraper_service import scrape_scheduler
 
 
 configure_logging()

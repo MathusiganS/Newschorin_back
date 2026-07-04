@@ -27,12 +27,6 @@ fastapi_app.py       compatibility Uvicorn entry point
 From the repository root:
 
 ```powershell
-uvicorn tamilwin_scraper.fastapi_app:app --reload --port 4000
-```
-
-The historical command from inside `tamilwin_scraper/` remains supported:
-
-```powershell
 uvicorn fastapi_app:app --reload --port 4000
 ```
 
@@ -74,6 +68,6 @@ URLs, and scraper scheduling retain their existing behavior.
 ## Tests
 
 ```powershell
-pip install -r tamilwin_scraper/requirements-dev.txt
-pytest tamilwin_scraper/tests
+pip install -r requirements-dev.txt
+pytest tests
 ```

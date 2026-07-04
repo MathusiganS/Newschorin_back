@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-from tamilwin_scraper.env import load_env_file
+from env import load_env_file
 
 
 def _env_bool(name: str, default: bool) -> bool:

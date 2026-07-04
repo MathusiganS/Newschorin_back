@@ -8,9 +8,9 @@ import jwt
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import APIKeyHeader, HTTPBasic, HTTPBasicCredentials
 
-from tamilwin_scraper.app.core.config import Settings, get_settings
-from tamilwin_scraper.app.core.passwords import verify_password
-from tamilwin_scraper.app.core.tokens import decode_admin_token
+from app.core.config import Settings, get_settings
+from app.core.passwords import verify_password
+from app.core.tokens import decode_admin_token
 
 
 optional_basic_security = HTTPBasic(auto_error=False)

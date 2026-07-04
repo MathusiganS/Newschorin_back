@@ -1,6 +1,6 @@
 """
 Run all news spiders sequentially.
-Results are merged into tamilwin_scraper/news.json with duplicate removal.
+Results are merged into news.json with duplicate removal.
 After scraping, syncs all items from news.json into the PostgreSQL database.
 """
 
@@ -14,11 +14,10 @@ import urllib.request
 import urllib.error
 
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
-REPOSITORY_ROOT = os.path.dirname(PROJECT_DIR)
-if REPOSITORY_ROOT not in sys.path:
-    sys.path.insert(0, REPOSITORY_ROOT)
+if PROJECT_DIR not in sys.path:
+    sys.path.insert(0, PROJECT_DIR)
 
-from tamilwin_scraper.env import load_env_file
+from env import load_env_file
 
 
 load_env_file()

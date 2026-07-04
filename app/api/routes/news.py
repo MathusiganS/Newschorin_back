@@ -4,7 +4,8 @@ from typing import Optional
 
 from fastapi import APIRouter
 
-from tamilwin_scraper.app.services.news_service import (
+from app.services.news_service import (
+    count_news,
     get_news_detail,
     list_news,
     popular_news,
@@ -19,14 +20,31 @@ router = APIRouter(prefix="/api/news", tags=["news"])
 def api_news_list(
     source: Optional[str] = None,
     category_ta: Optional[str] = None,
+    search: Optional[str] = None,
     sort: Optional[str] = None,
     limit: Optional[int] = None,
+    offset: Optional[int] = None,
 ):
     return list_news(
         source=source,
         category_ta=category_ta,
+        search=search,
         sort=sort,
         limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/count")
+def api_news_count(
+    source: Optional[str] = None,
+    category_ta: Optional[str] = None,
+    search: Optional[str] = None,
+):
+    return count_news(
+        source=source,
+        category_ta=category_ta,
+        search=search,
     )
 
 

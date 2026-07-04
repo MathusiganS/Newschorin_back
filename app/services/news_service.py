@@ -5,9 +5,9 @@ from typing import Any, Optional
 
 from fastapi import HTTPException
 
-from tamilwin_scraper.app.db.connection import connection_scope
-from tamilwin_scraper.app.db.schema import ensure_schema
-from tamilwin_scraper.app.repositories.news_repository import NewsRepository
+from app.db.connection import connection_scope
+from app.db.schema import ensure_schema
+from app.repositories.news_repository import NewsRepository
 
 
 logger = logging.getLogger(__name__)
@@ -16,16 +16,26 @@ logger = logging.getLogger(__name__)
 def list_news(
     source: Optional[str] = None,
     category_ta: Optional[str] = None,
+    search: Optional[str] = None,
     sort: Optional[str] = None,
     limit: Optional[int] = None,
-) -> list[dict[str, Any]]:
+    offset: Optional[int] = None,
+) -> dict[str, Any]:
     with connection_scope() as conn:
         ensure_schema(conn)
-        rows = NewsRepository(conn).list_public(
+        repository = NewsRepository(conn)
+        rows = repository.list_public(
             source=source,
             category_ta=category_ta,
+            search=search,
             sort=sort,
             limit=limit,
+            offset=offset,
+        )
+        total = repository.count_public(
+            source=source,
+            category_ta=category_ta,
+            search=search,
         )
     if (sort or "").lower() in {"trending", "popular", "views"}:
         logger.info(
@@ -41,7 +51,22 @@ def list_news(
                 for row in rows
             ],
         )
-    return rows
+    return {"items": rows, "total": total}
+
+
+def count_news(
+    source: Optional[str] = None,
+    category_ta: Optional[str] = None,
+    search: Optional[str] = None,
+) -> dict[str, int]:
+    with connection_scope() as conn:
+        ensure_schema(conn)
+        total = NewsRepository(conn).count_public(
+            source=source,
+            category_ta=category_ta,
+            search=search,
+        )
+    return {"total": total}
 
 
 def popular_news(limit: int = 4) -> list[dict[str, Any]]:
