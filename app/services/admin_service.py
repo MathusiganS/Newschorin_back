@@ -13,7 +13,7 @@ from app.repositories.news_repository import NewsRepository
 from app.schemas.admin import AdminNewsUpdate
 from app.services.classification_service import classify_article
 from app.utils.datetime import parse_scraped_datetime
-from app.utils.images import normalize_image_path
+from app.utils.images import normalize_image_path, save_admin_image_data
 
 
 logger = logging.getLogger(__name__)
@@ -79,21 +79,50 @@ def get_admin_news(article_id: int) -> dict[str, Any]:
 
 
 def update_admin_news(article_id: int, body: AdminNewsUpdate) -> dict[str, bool]:
+    logger.info("Admin article update started article_id=%s", article_id)
     status = normalize_status(body.status) if body.status is not None else None
     updates: list[tuple[str, Any]] = []
     if body.title is not None:
         updates.append(("title", body.title))
     if body.url is not None:
         updates.append(("url", body.url))
-    image_path = (
-        body.image_path
-        if body.image_path is not None
-        else body.image
-        if body.image is not None
-        else body.image_url
-        if body.image_url is not None
-        else body.imageUrl
-    )
+    image_data = body.image_data if body.image_data is not None else body.imageData
+    if image_data:
+        logger.info(
+            "Admin article image upload received article_id=%s image_data_chars=%s",
+            article_id,
+            len(image_data),
+        )
+        try:
+            image_path = save_admin_image_data(image_data)
+        except ValueError as exc:
+            logger.warning(
+                "Admin article image upload failed article_id=%s error=%s",
+                article_id,
+                exc,
+            )
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        logger.info(
+            "Admin article image upload stored article_id=%s image_path=%s",
+            article_id,
+            image_path,
+        )
+    else:
+        image_path = (
+            body.image_path
+            if body.image_path is not None
+            else body.image
+            if body.image is not None
+            else body.image_url
+            if body.image_url is not None
+            else body.imageUrl
+        )
+        if image_path is not None:
+            logger.info(
+                "Admin article image path update received article_id=%s image_path=%s",
+                article_id,
+                normalize_image_path(image_path),
+            )
     if image_path is not None:
         updates.append(("image_path", normalize_image_path(image_path)))
     if body.full_text is not None:
@@ -107,13 +136,27 @@ def update_admin_news(article_id: int, body: AdminNewsUpdate) -> dict[str, bool]
     if status is not None:
         updates.append(("status", status))
     if not updates:
+        logger.warning("Admin article update rejected article_id=%s reason=no_fields", article_id)
         raise HTTPException(status_code=400, detail="No fields to update")
 
+    logger.info(
+        "Admin article update writing database article_id=%s fields=%s",
+        article_id,
+        ",".join(field for field, _ in updates),
+    )
     with connection_scope() as conn:
         found = NewsRepository(conn).update_admin(article_id, updates)
     if not found:
+        logger.warning("Admin article update failed article_id=%s reason=not_found", article_id)
         raise HTTPException(status_code=404, detail="Article not found")
-    return get_admin_news(article_id) | {"ok": True}
+    updated = get_admin_news(article_id)
+    logger.info(
+        "Admin article update completed article_id=%s image_path=%s status=%s",
+        article_id,
+        updated.get("image_path"),
+        updated.get("status"),
+    )
+    return updated | {"ok": True}
 
 
 def reclassify_all_news() -> dict[str, int]:
