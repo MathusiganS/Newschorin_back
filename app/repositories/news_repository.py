@@ -5,7 +5,7 @@ from typing import Any, Iterable, Optional
 from psycopg2.extensions import connection
 
 from app.utils.datetime import json_datetime
-from app.utils.images import to_image_url
+from app.utils.images import normalize_image_path, to_image_url
 
 
 class NewsRepository:
@@ -527,7 +527,8 @@ class NewsRepository:
 
     @staticmethod
     def _admin_row(row: tuple[Any, ...]) -> dict[str, Any]:
-        image = to_image_url(row[3] or "")
+        stored_image = normalize_image_path(row[3] or "")
+        image = to_image_url(stored_image) or stored_image
         return {
             "id": row[0],
             "title": row[1],
