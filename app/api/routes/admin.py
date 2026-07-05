@@ -73,8 +73,9 @@ def api_admin_news_list(
     sort: Optional[str] = None,
     limit: Optional[int] = None,
     offset: Optional[int] = None,
+    include_meta: bool = False,
 ):
-    return list_admin_news(
+    result = list_admin_news(
         status=status,
         source=source,
         category_ta=category_ta,
@@ -83,6 +84,9 @@ def api_admin_news_list(
         limit=limit,
         offset=offset,
     )
+    if include_meta:
+        return result
+    return result["items"]
 
 
 @router.get("/news/{article_id:int}")
