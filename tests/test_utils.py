@@ -13,6 +13,7 @@ from app.utils.datetime import (
     parse_scraped_datetime,
 )
 from app.utils.images import normalize_image_path
+from app.utils.images import save_admin_image_data
 
 
 def test_image_path_contract() -> None:
@@ -44,6 +45,27 @@ def test_admin_row_preserves_stored_local_image_path() -> None:
 
     assert article["image"] == "/images/missing.webp"
     assert article["image_path"] == "/images/missing.webp"
+
+
+def test_save_admin_image_data_writes_file(tmp_path) -> None:
+    image_path = save_admin_image_data(
+        "data:image/png;base64,iVBORw0KGgo=", image_dir=tmp_path
+    )
+
+    assert image_path.startswith("/images/admin_")
+    assert image_path.endswith(".png")
+    assert (tmp_path / image_path.rsplit("/", 1)[-1]).read_bytes() == (
+        b"\x89PNG\r\n\x1a\n"
+    )
+
+
+def test_save_admin_image_data_rejects_unsupported_type(tmp_path) -> None:
+    try:
+        save_admin_image_data("data:text/plain;base64,aGVsbG8=", image_dir=tmp_path)
+    except ValueError as exc:
+        assert "JPG, PNG, WebP, GIF, or AVIF" in str(exc)
+    else:
+        raise AssertionError("Unsupported uploads should fail")
 
 
 def test_datetime_contract_uses_sri_lanka_offset() -> None:
