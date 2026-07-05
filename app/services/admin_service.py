@@ -85,7 +85,15 @@ def update_admin_news(article_id: int, body: AdminNewsUpdate) -> dict[str, bool]
         updates.append(("title", body.title))
     if body.url is not None:
         updates.append(("url", body.url))
-    image_path = body.image_path if body.image_path is not None else body.image
+    image_path = (
+        body.image_path
+        if body.image_path is not None
+        else body.image
+        if body.image is not None
+        else body.image_url
+        if body.image_url is not None
+        else body.imageUrl
+    )
     if image_path is not None:
         updates.append(("image_path", normalize_image_path(image_path)))
     if body.full_text is not None:
@@ -105,7 +113,7 @@ def update_admin_news(article_id: int, body: AdminNewsUpdate) -> dict[str, bool]
         found = NewsRepository(conn).update_admin(article_id, updates)
     if not found:
         raise HTTPException(status_code=404, detail="Article not found")
-    return {"ok": True}
+    return get_admin_news(article_id) | {"ok": True}
 
 
 def reclassify_all_news() -> dict[str, int]:

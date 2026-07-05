@@ -10,6 +10,8 @@ class AdminNewsUpdate(BaseModel):
     url: Optional[str] = Field(default=None, max_length=8_000)
     image_path: Optional[str] = Field(default=None, max_length=8_000)
     image: Optional[str] = Field(default=None, max_length=8_000)
+    image_url: Optional[str] = Field(default=None, max_length=8_000)
+    imageUrl: Optional[str] = Field(default=None, max_length=8_000)
     full_text: Optional[str] = Field(default=None, max_length=1_000_000)
     source: Optional[str] = Field(default=None, max_length=255)
     category_ta: Optional[str] = Field(default=None, max_length=255)

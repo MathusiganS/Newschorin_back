@@ -23,6 +23,29 @@ def test_image_path_contract() -> None:
     assert normalize_image_path(r"C:\images\story.webp") == "/images/story.webp"
 
 
+def test_admin_row_preserves_stored_local_image_path() -> None:
+    from app.repositories.news_repository import NewsRepository
+
+    row = (
+        1,
+        "Title",
+        "https://example.com/story",
+        "/images/missing.webp",
+        "Body",
+        "source",
+        "category",
+        "approved",
+        None,
+        "",
+        "",
+    )
+
+    article = NewsRepository._admin_row(row)
+
+    assert article["image"] == "/images/missing.webp"
+    assert article["image_path"] == "/images/missing.webp"
+
+
 def test_datetime_contract_uses_sri_lanka_offset() -> None:
     parsed = parse_scraped_datetime("2026-06-11T10:00:00Z")
     assert parsed == "2026-06-11T15:30:00"
