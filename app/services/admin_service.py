@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
 
@@ -17,6 +19,7 @@ from app.utils.images import normalize_image_path, save_admin_image_data
 
 
 logger = logging.getLogger(__name__)
+SRI_LANKA_TZ = ZoneInfo("Asia/Colombo")
 
 
 def normalize_status(raw: Optional[str]) -> Optional[str]:
@@ -135,6 +138,12 @@ def update_admin_news(article_id: int, body: AdminNewsUpdate) -> dict[str, bool]
         updates.append(("created_at", parse_scraped_datetime(body.created_at)))
     if status is not None:
         updates.append(("status", status))
+        if status == "approved":
+            with connection_scope() as conn:
+                current = NewsRepository(conn).get_admin_status(article_id)
+            if current and (current[0] != "approved" or current[1] is None):
+                approved_at = datetime.now(SRI_LANKA_TZ).replace(tzinfo=None)
+                updates.append(("approved_at", approved_at))
     if not updates:
         logger.warning("Admin article update rejected article_id=%s reason=no_fields", article_id)
         raise HTTPException(status_code=400, detail="No fields to update")

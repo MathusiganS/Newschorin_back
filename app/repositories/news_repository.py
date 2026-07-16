@@ -22,9 +22,12 @@ class NewsRepository:
         offset: Optional[int] = None,
     ) -> list[dict[str, Any]]:
         where_sql, params = self._public_filters(source, category_ta, search)
-        order_sql = "ORDER BY created_at DESC, id DESC"
+        order_sql = "ORDER BY COALESCE(approved_at, created_at) DESC, id DESC"
         if (sort or "").lower() in {"trending", "popular", "views"}:
-            order_sql = "ORDER BY view_count DESC, created_at DESC, id DESC"
+            order_sql = (
+                "ORDER BY view_count DESC, "
+                "COALESCE(approved_at, created_at) DESC, id DESC"
+            )
         bounded_limit = max(1, min(limit or 20, 100))
         bounded_offset = max(0, offset or 0)
         params.extend([bounded_limit, bounded_offset])
@@ -32,7 +35,8 @@ class NewsRepository:
         with self.conn.cursor() as cursor:
             cursor.execute(
                 f"""
-                SELECT id, title, image_path, source, category_ta, created_at,
+                SELECT id, title, image_path, source, category_ta,
+                       COALESCE(approved_at, created_at) AS published_at,
                        view_count, full_text
                 FROM news
                 {where_sql}
@@ -68,11 +72,12 @@ class NewsRepository:
         with self.conn.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT id, title, image_path, source, category_ta, created_at,
+                SELECT id, title, image_path, source, category_ta,
+                       COALESCE(approved_at, created_at) AS published_at,
                        view_count
                 FROM news
                 WHERE status = 'approved'
-                ORDER BY view_count DESC, created_at DESC, id DESC
+                ORDER BY view_count DESC, COALESCE(approved_at, created_at) DESC, id DESC
                 LIMIT %s
                 """,
                 (bounded_limit,),
@@ -85,7 +90,8 @@ class NewsRepository:
             cursor.execute(
                 """
                 SELECT id, title, url, image_path, full_text, source,
-                       category_ta, created_at, view_count
+                       category_ta, COALESCE(approved_at, created_at) AS published_at,
+                       view_count
                 FROM news
                 WHERE id = %s AND status = 'approved'
                 """,
@@ -294,7 +300,7 @@ class NewsRepository:
                 f"""
                 SELECT id, title, url, image_path, full_text, source,
                        category_ta, status, created_at, original_title,
-                       original_full_text
+                       original_full_text, approved_at
                 FROM news
                 {where_sql}
                 {order_sql}
@@ -336,7 +342,7 @@ class NewsRepository:
                 """
                 SELECT id, title, url, image_path, full_text, source,
                        category_ta, status, created_at, original_title,
-                       original_full_text
+                       original_full_text, approved_at
                 FROM news
                 WHERE id = %s
                 """,
@@ -344,6 +350,18 @@ class NewsRepository:
             )
             row = cursor.fetchone()
         return self._admin_row(row) if row else None
+
+    def get_admin_status(self, article_id: int) -> Optional[tuple[str, Any]]:
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT status, approved_at
+                FROM news
+                WHERE id = %s
+                """,
+                (article_id,),
+            )
+            return cursor.fetchone()
 
     def update_admin(
         self,
@@ -495,6 +513,7 @@ class NewsRepository:
             "source": row[3] or "unknown",
             "category_ta": row[4] or "",
             "created_at": json_datetime(row[5]) or "",
+            "approved_at": json_datetime(row[5]) or "",
             "view_count": row[6] or 0,
             "excerpt": full_text[:140] + ("..." if len(full_text) > 140 else ""),
         }
@@ -508,6 +527,7 @@ class NewsRepository:
             "source": row[3] or "unknown",
             "category_ta": row[4] or "",
             "created_at": json_datetime(row[5]) or "",
+            "approved_at": json_datetime(row[5]) or "",
             "view_count": row[6] or 0,
         }
 
@@ -522,6 +542,7 @@ class NewsRepository:
             "source": row[5] or "unknown",
             "category_ta": row[6] or "",
             "created_at": json_datetime(row[7]) or "",
+            "approved_at": json_datetime(row[7]) or "",
             "view_count": row[8] or 0,
         }
 
@@ -542,4 +563,5 @@ class NewsRepository:
             "created_at": json_datetime(row[8]) or "",
             "original_title": row[9] or row[1] or "",
             "original_full_text": row[10] or row[4] or "",
+            "approved_at": json_datetime(row[11]) or "",
         }
