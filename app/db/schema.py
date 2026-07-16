@@ -17,7 +17,8 @@ SCHEMA_STATEMENTS = (
         category_ta TEXT DEFAULT '',
         status TEXT DEFAULT 'pending',
         view_count INTEGER DEFAULT 0,
-        created_at TIMESTAMP DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Colombo')
+        created_at TIMESTAMP DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Colombo'),
+        approved_at TIMESTAMP
     )
     """,
     "ALTER TABLE news ADD COLUMN IF NOT EXISTS source TEXT DEFAULT ''",
@@ -26,6 +27,7 @@ SCHEMA_STATEMENTS = (
     "ALTER TABLE news ADD COLUMN IF NOT EXISTS original_title TEXT DEFAULT ''",
     "ALTER TABLE news ADD COLUMN IF NOT EXISTS original_full_text TEXT DEFAULT ''",
     "ALTER TABLE news ADD COLUMN IF NOT EXISTS view_count INTEGER DEFAULT 0",
+    "ALTER TABLE news ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP",
     (
         "ALTER TABLE news ADD COLUMN IF NOT EXISTS created_at TIMESTAMP "
         "DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Colombo')"
@@ -33,6 +35,10 @@ SCHEMA_STATEMENTS = (
     (
         "ALTER TABLE news ALTER COLUMN created_at SET DEFAULT "
         "(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Colombo')"
+    ),
+    (
+        "UPDATE news SET approved_at = created_at "
+        "WHERE status = 'approved' AND approved_at IS NULL"
     ),
     """
     CREATE TABLE IF NOT EXISTS sync_errors (

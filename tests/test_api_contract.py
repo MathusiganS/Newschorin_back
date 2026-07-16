@@ -9,6 +9,7 @@ from fastapi_app import app
 EXPECTED_ROUTES = {
     ("GET", "/"),
     ("GET", "/health"),
+    ("GET", "/api/health"),
     ("GET", "/api/classifier/diagnose"),
     ("POST", "/api/classify"),
     ("GET", "/api/news"),
@@ -66,6 +67,9 @@ def test_http_smoke_contract() -> None:
         "health": "/health",
     }
     assert client.get("/health").json() == {"ok": True}
+    api_health = client.get("/api/health").json()
+    assert api_health["ok"] is True
+    assert api_health["features"]["admin_image_upload"] is True
     assert client.post("/api/classify", json={"text": ""}).json() == {
         "category_ta": ""
     }
