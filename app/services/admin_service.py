@@ -134,6 +134,8 @@ def update_admin_news(article_id: int, body: AdminNewsUpdate) -> dict[str, bool]
         updates.append(("source", body.source))
     if body.category_ta is not None:
         updates.append(("category_ta", body.category_ta))
+    if body.show_in_important is not None:
+        updates.append(("show_in_important", body.show_in_important))
     if body.created_at is not None:
         updates.append(("created_at", parse_scraped_datetime(body.created_at)))
     if status is not None:

@@ -13,6 +13,7 @@ EXPECTED_ROUTES = {
     ("GET", "/api/classifier/diagnose"),
     ("POST", "/api/classify"),
     ("GET", "/api/news"),
+    ("GET", "/api/news/important"),
     ("GET", "/api/news/popular"),
     ("GET", "/api/news/trending"),
     ("POST", "/api/news/{article_id:int}/view"),

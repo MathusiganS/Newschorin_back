@@ -16,6 +16,7 @@ SCHEMA_STATEMENTS = (
         source TEXT DEFAULT '',
         category_ta TEXT DEFAULT '',
         status TEXT DEFAULT 'pending',
+        show_in_important BOOLEAN NOT NULL DEFAULT TRUE,
         view_count INTEGER DEFAULT 0,
         created_at TIMESTAMP DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Colombo'),
         approved_at TIMESTAMP
@@ -24,6 +25,10 @@ SCHEMA_STATEMENTS = (
     "ALTER TABLE news ADD COLUMN IF NOT EXISTS source TEXT DEFAULT ''",
     "ALTER TABLE news ADD COLUMN IF NOT EXISTS category_ta TEXT DEFAULT ''",
     "ALTER TABLE news ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending'",
+    (
+        "ALTER TABLE news ADD COLUMN IF NOT EXISTS show_in_important "
+        "BOOLEAN NOT NULL DEFAULT TRUE"
+    ),
     "ALTER TABLE news ADD COLUMN IF NOT EXISTS original_title TEXT DEFAULT ''",
     "ALTER TABLE news ADD COLUMN IF NOT EXISTS original_full_text TEXT DEFAULT ''",
     "ALTER TABLE news ADD COLUMN IF NOT EXISTS view_count INTEGER DEFAULT 0",

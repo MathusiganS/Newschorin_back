@@ -18,4 +18,5 @@ class AdminNewsUpdate(BaseModel):
     source: Optional[str] = Field(default=None, max_length=255)
     category_ta: Optional[str] = Field(default=None, max_length=255)
     status: Optional[str] = Field(default=None, max_length=32)
+    show_in_important: Optional[bool] = None
     created_at: Optional[str] = Field(default=None, max_length=128)
