@@ -69,6 +69,12 @@ def count_news(
     return {"total": total}
 
 
+def important_news() -> Optional[dict[str, Any]]:
+    with connection_scope() as conn:
+        ensure_schema(conn)
+        return NewsRepository(conn).get_important()
+
+
 def popular_news(limit: int = 4) -> list[dict[str, Any]]:
     with connection_scope() as conn:
         ensure_schema(conn)

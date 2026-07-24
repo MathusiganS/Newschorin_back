@@ -37,7 +37,7 @@ class NewsRepository:
                 f"""
                 SELECT id, title, image_path, source, category_ta,
                        COALESCE(approved_at, created_at) AS published_at,
-                       view_count, full_text
+                       view_count, full_text, show_in_important
                 FROM news
                 {where_sql}
                 {order_sql}
@@ -47,6 +47,22 @@ class NewsRepository:
             )
             rows = cursor.fetchall()
         return [self._public_list_row(row) for row in rows]
+
+    def get_important(self) -> Optional[dict[str, Any]]:
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT id, title, image_path, source, category_ta,
+                       COALESCE(approved_at, created_at) AS published_at,
+                       view_count, full_text, show_in_important
+                FROM news
+                WHERE status = 'approved' AND show_in_important = TRUE
+                ORDER BY COALESCE(approved_at, created_at) DESC, id DESC
+                LIMIT 1
+                """
+            )
+            row = cursor.fetchone()
+        return self._public_list_row(row) if row else None
 
     def count_public(
         self,
@@ -300,7 +316,7 @@ class NewsRepository:
                 f"""
                 SELECT id, title, url, image_path, full_text, source,
                        category_ta, status, created_at, original_title,
-                       original_full_text, approved_at
+                       original_full_text, approved_at, show_in_important
                 FROM news
                 {where_sql}
                 {order_sql}
@@ -342,7 +358,7 @@ class NewsRepository:
                 """
                 SELECT id, title, url, image_path, full_text, source,
                        category_ta, status, created_at, original_title,
-                       original_full_text, approved_at
+                       original_full_text, approved_at, show_in_important
                 FROM news
                 WHERE id = %s
                 """,
@@ -516,6 +532,7 @@ class NewsRepository:
             "approved_at": json_datetime(row[5]) or "",
             "view_count": row[6] or 0,
             "excerpt": full_text[:140] + ("..." if len(full_text) > 140 else ""),
+            "show_in_important": row[8] is not False,
         }
 
     @staticmethod
@@ -564,4 +581,5 @@ class NewsRepository:
             "original_title": row[9] or row[1] or "",
             "original_full_text": row[10] or row[4] or "",
             "approved_at": json_datetime(row[11]) or "",
+            "show_in_important": row[12] is not False,
         }

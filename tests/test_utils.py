@@ -39,12 +39,35 @@ def test_admin_row_preserves_stored_local_image_path() -> None:
         None,
         "",
         "",
+        None,
+        True,
     )
 
     article = NewsRepository._admin_row(row)
 
     assert article["image"] == "/images/missing.webp"
     assert article["image_path"] == "/images/missing.webp"
+    assert article["show_in_important"] is True
+
+
+def test_public_list_row_exposes_important_news_choice() -> None:
+    from app.repositories.news_repository import NewsRepository
+
+    article = NewsRepository._public_list_row(
+        (
+            1,
+            "Title",
+            "",
+            "source",
+            "category",
+            None,
+            0,
+            "Body",
+            False,
+        )
+    )
+
+    assert article["show_in_important"] is False
 
 
 def test_save_admin_image_data_writes_file(tmp_path) -> None:

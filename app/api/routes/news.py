@@ -7,6 +7,7 @@ from fastapi import APIRouter
 from app.services.news_service import (
     count_news,
     get_news_detail,
+    important_news,
     list_news,
     popular_news,
     track_view,
@@ -51,6 +52,11 @@ def api_news_count(
 @router.get("/popular")
 def api_news_popular(limit: int = 4):
     return popular_news(limit)
+
+
+@router.get("/important")
+def api_news_important():
+    return important_news()
 
 
 @router.get("/trending")
